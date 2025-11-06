@@ -162,9 +162,11 @@ class AgentState(TypedDict):
     conversation_id: str
     tools_result: dict
 
-# Checkpoint 持久化 (PostgreSQL)
-checkpointer = AsyncPostgresSaver.from_conn_string(
-    "postgresql://user:pass@localhost/nexus_agent"
+# Checkpoint 持久化 (MySQL)
+# pip install langgraph-checkpoint-mysql
+from langgraph.checkpoint.mysql.aio import AIOMySQLSaver
+checkpointer = AIOMySQLSaver.from_conn_string(
+    "mysql://nexus:nexus_pass@localhost:3306/nexus_agent"
 )
 
 # 线程命名空间
@@ -339,7 +341,7 @@ services:
     ports:
       - "8001:8001"
     environment:
-      - POSTGRES_URL=postgres:5432
+      - MYSQL_URL=mysql:3306
       - REDIS_URL=redis:6379
 
   # 基础设施
@@ -482,3 +484,68 @@ LangGraph (LangSmith 集成)
 - [ ] A2A (Agent to Agent) 协议支持
 - [ ] Agent Marketplace (模板市场)
 - [ ] 多模态支持 (图像、语音)
+
+---
+
+## 10. 容器内测试环境说明
+
+> 本项目运行在无 Docker 的容器环境中，以下为实际可用的技术栈。
+
+### 10.1 环境清单（已验证 ✅）
+
+| 组件 | 版本 | 运行方式 | 用途 |
+|------|------|----------|------|
+| **Java** | OpenJDK 21 | 直接运行 | Java 微服务编译 |
+| **Maven** | 3.9.9 | 直接运行 | Java 依赖管理 |
+| **Python** | 3.12.12 | 直接运行 | Python AI 服务 |
+| **FastAPI** | 0.135 | pip | HTTP/SSE 框架 |
+| **LangGraph** | 1.1.2 | pip | Agent 执行引擎 |
+| **langgraph-checkpoint-mysql** | 3.0.0 | pip | Agent 状态持久化 |
+| **MySQL (MariaDB)** | 11.8.6 | 进程启动 | 关系型数据库 |
+| **Redis** | 8.0.2 | 进程启动 | 缓存/Session |
+| **ChromaDB** | 1.5.2 | pip | 向量数据库（开发） |
+| **faiss-cpu** | - | pip | 轻量向量检索 |
+| **sentence-transformers** | 5.2.3 | pip | 本地 Embedding 模型 |
+| **SQLAlchemy** | 2.0.48 | pip | ORM |
+| **pydantic** | 2.12.5 | pip | 数据验证 |
+
+### 10.2 生产 vs 容器内测试对应关系
+
+| 生产规划 | 容器内替代 | 接口兼容 |
+|----------|------------|----------|
+| Milvus | ChromaDB | 通过 Retriever 抽象层 ✅ |
+| 独立 MySQL 服务 | 容器内进程 | 相同连接串 ✅ |
+| 独立 Redis 集群 | 容器内单机 Redis | 相同接口 ✅ |
+| Nacos 服务发现 | 硬编码配置 (dev profile) | Spring Profile 切换 ✅ |
+| RabbitMQ | 内存队列 / asyncio.Queue | 接口抽象隔离 ✅ |
+| MinIO | 本地文件系统 | 通过 Storage 抽象层 ✅ |
+
+### 10.3 测试策略
+
+```
+单元测试 (Unit)
+├── Java: JUnit 5 + H2 内存数据库 + Mockito
+└── Python: pytest + TestClient (FastAPI) + 内存 ChromaDB
+
+集成测试 (Integration)
+├── Java: Spring Boot Test + 容器内 MySQL/Redis
+└── Python: pytest-asyncio + 容器内 MySQL/Redis
+
+端到端测试 (E2E)
+└── Python: HTTPx + FastAPI TestClient 模拟全链路
+```
+
+### 10.4 服务启动脚本（容器内）
+
+```bash
+# 启动 MySQL (MariaDB)
+mkdir -p /var/run/mysqld && chown mysql:mysql /var/run/mysqld
+mysqld --user=mysql --bind-address=127.0.0.1 --port=3306 &
+
+# 启动 Redis
+redis-server --daemonize yes --port 6379
+
+# 初始化数据库用户
+mysql -u root -e "CREATE USER IF NOT EXISTS 'nexus'@'%' IDENTIFIED BY 'nexus_pass';"
+mysql -u root -e "GRANT ALL PRIVILEGES ON nexus_agent.* TO 'nexus'@'%'; FLUSH PRIVILEGES;"
+```

@@ -15,34 +15,53 @@
 | 方案 | 说明 | 推荐度 |
 |------|------|--------|
 | InMemoryStore | 默认内存存储，无法生产级隔离 | ❌ |
-| 外部 PostgreSQL + AsyncPostgresSaver | 官方推荐生产方案 | ✅✅ |
+| InMemoryStore (默认) | 无状态隔离，不适合生产 | ❌ |
+| 外部 MySQL + AIOMySQLSaver | 社区维护，与项目 MySQL 统一 | ✅✅ |
 | 命名空间隔离 | thread_id = `f"{tenant_id}:{conversation_id}"` | ✅✅ |
-| Metadata 注入 | 在 config 中添加 user_id 便于 LangSmith 追踪 | ✅ |
+| Metadata 注入 | 在 config 中添加 user_id 便于追踪 | ✅ |
+
+> 📦 依赖包：`langgraph-checkpoint-mysql`（社区包，MIT 协议，截至 2025-01 最新版 2.0.12）
+> 整个项目统一使用 MySQL 8，无需额外引入 PostgreSQL，降低运维复杂度。
 
 ### 最终方案
 
 ```python
-# Agent 状态持久化使用 PostgreSQL + AsyncPostgresSaver
-from langgraph.checkpoint.postgres import AsyncPostgresSaver
+# pip install langgraph-checkpoint-mysql aiomysql
+from langgraph.checkpoint.mysql.aio import AIOMySQLSaver
 
-# 线程命名空间设计
-thread_id = f"{tenant_id}:{conversation_id}"  # 确保租户隔离
+DB_URI = "mysql://nexus:nexus_pass@localhost:3306/nexus_agent"
 
-# Checkpointer 配置
-checkpointer = AsyncPostgresSaver.from_conn_string(conn_string)
-graph.checkpointer = checkpointer
+async def create_agent():
+    async with AIOMySQLSaver.from_conn_string(DB_URI) as checkpointer:
+        # 首次使用需 setup（建表）
+        await checkpointer.setup()
+        graph = build_graph()
+        graph.checkpointer = checkpointer
 
-# 调用时传入 tenant context
-config = {
-    "configurable": {
-        "thread_id": thread_id,
-        "tenant_id": tenant_id,  # 用于 metadata 追踪
-    }
-}
+        # 线程命名空间：租户:会话
+        thread_id = f"{tenant_id}:{conversation_id}"
+
+        config = {
+            "configurable": {
+                "thread_id": thread_id,
+                "checkpoint_ns": "",
+                "tenant_id": tenant_id,   # metadata，用于追踪
+            }
+        }
+        return graph, config
 ```
 
+### checkpoint 相关表（由 setup() 自动创建）
+
+| 表名 | 作用 |
+|------|------|
+| `checkpoints` | 每个 thread 的最新 checkpoint |
+| `checkpoint_blobs` | 序列化的 channel 状态 blob |
+| `checkpoint_writes` | pending writes 队列 |
+
 ### 备选
-- MongoDB + AsyncMongoSaver (如果团队熟悉 Mongo)
+- PyMySQLSaver（同步版，适合非异步代码路径）
+- 自定义实现 BaseCheckpointSaver（如需定制化 TTL 清理策略）
 
 ---
 
@@ -245,7 +264,7 @@ results = vectorstore.similarity_search(
 
 | 日期 | 决策项 | 最终方案 | 备注 |
 |------|--------|----------|------|
-| 2026-03-17 | LangGraph 多租户 | PostgreSQL + 命名空间隔离 | AsyncPostgresSaver |
+| 2026-03-17 | LangGraph 多租户 | MySQL + 命名空间隔离 | AIOMySQLSaver (langgraph-checkpoint-mysql) |
 | 2026-03-17 | RAG 混合搜索 | Milvus 原生 RRF | BGE-M3 + BM25 |
 | 2026-03-17 | 多租户 RBAC | JWT + ThreadLocal + Redis | key 必须含 tenant |
 | 2026-03-17 | 通信协议 | gRPC + SSE | 服务间 / 流式输出 |
