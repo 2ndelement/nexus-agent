@@ -36,7 +36,10 @@
 ```
 向量库: chromadb (内存/文件模式，无需外部服务)
 Embedding: sentence-transformers (本地模型，无需 API Key)
-LLM 调用: openai SDK (通过 Copilot Hub 代理)
+LLM 调用: openai SDK (Copilot Hub 代理)
+  - base_url: https://copilot.lab.2ndelement.tech/v1
+  - api_key: lab-sk-ABiGIb07yUVzIYrd0oXYwAyH2tmW0zwd
+  - model: gpt-4o
 ```
 
 ---
