@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tech.nexus.auth.mapper.UserMapper">
+    <!-- MyBatis-Plus 自动生成通用 CRUD，此处仅添加自定义查询 -->
+
+    <select id="findByTenantIdAndUsername" resultType="tech.nexus.auth.entity.User">
+        SELECT *
+        FROM `user`
+        WHERE tenant_id = #{tenantId}
+          AND username = #{username}
+        LIMIT 1
+    </select>
+
+</mapper>

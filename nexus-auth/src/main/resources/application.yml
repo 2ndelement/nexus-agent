@@ -1,0 +1,43 @@
+server:
+  port: 8002
+
+spring:
+  application:
+    name: nexus-auth
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/nexus_agent?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: nexus
+    password: nexus_pass
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+          min-idle: 1
+
+mybatis-plus:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: tech.nexus.auth.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    db-config:
+      id-type: auto
+
+nexus:
+  jwt:
+    # 生产环境从环境变量或配置中心注入，此处为占位符
+    secret: ${NEXUS_JWT_SECRET:nexus-auth-jwt-secret-key-must-be-at-least-32-characters-long}
+    access-token-expiration-ms: 7200000     # 2 小时
+    refresh-token-expiration-ms: 2592000000 # 30 天
+
+logging:
+  level:
+    tech.nexus: DEBUG
+    com.baomidou.mybatisplus: WARN
