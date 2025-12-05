@@ -1,0 +1,87 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: nexus-gateway
+  # ── Spring Cloud Gateway 路由配置 ──────────────────────────
+  cloud:
+    gateway:
+      # 全局超时（毫秒）
+      httpclient:
+        connect-timeout: 5000
+        response-timeout: 30s
+      # 默认 Filter：去掉请求路径前缀已在各路由中处理
+      default-filters:
+        # 保留 SSE 流式传输的 transfer-encoding: chunked（不缓冲）
+        - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+      routes:
+        # ── /api/auth/** → nexus-auth (8002)，白名单，不需要 Token ──
+        - id: nexus-auth
+          uri: http://127.0.0.1:8002
+          predicates:
+            - Path=/api/auth/**
+          filters:
+            - StripPrefix=0
+
+        # ── /api/tenant/** → nexus-tenant (8003) ─────────────────
+        - id: nexus-tenant
+          uri: http://127.0.0.1:8003
+          predicates:
+            - Path=/api/tenant/**
+          filters:
+            - StripPrefix=0
+
+        # ── /api/session/** → nexus-session (8004) ───────────────
+        - id: nexus-session
+          uri: http://127.0.0.1:8004
+          predicates:
+            - Path=/api/session/**
+          filters:
+            - StripPrefix=0
+
+        # ── /api/agent/** → agent-engine (8001)，支持 SSE ────────
+        - id: nexus-agent-engine
+          uri: http://127.0.0.1:8001
+          predicates:
+            - Path=/api/agent/**
+          filters:
+            - StripPrefix=0
+          # SSE 流式：不缓冲响应体
+          metadata:
+            response-timeout: 300000
+            connect-timeout: 5000
+
+        # ── /api/knowledge/** → rag-service (8005) ───────────────
+        - id: nexus-knowledge
+          uri: http://127.0.0.1:8005
+          predicates:
+            - Path=/api/knowledge/**
+          filters:
+            - StripPrefix=0
+
+# ── JWT 配置（与 nexus-auth 共享同一密钥） ─────────────────────
+nexus:
+  jwt:
+    secret: ${NEXUS_JWT_SECRET:nexus-auth-jwt-secret-key-must-be-at-least-32-characters-long}
+    expiration-ms: 7200000
+  gateway:
+    white-list:
+      - /api/auth/**
+      - /actuator/health
+      - /actuator/info
+
+# ── 管理端点 ──────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    tech.nexus.gateway: DEBUG
+    org.springframework.cloud.gateway: INFO

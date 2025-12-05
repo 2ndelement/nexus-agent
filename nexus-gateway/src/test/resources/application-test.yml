@@ -1,0 +1,43 @@
+spring:
+  cloud:
+    gateway:
+      routes:
+        # 测试用：把所有路由指向 WireMock / MockServer（由测试代码动态设置）
+        # 此处使用一个无效地址，测试中会通过 WebTestClient 直接测 filter 逻辑
+        - id: nexus-auth-test
+          uri: http://127.0.0.1:19999
+          predicates:
+            - Path=/api/auth/**
+
+        - id: nexus-protected-test
+          uri: http://127.0.0.1:19999
+          predicates:
+            - Path=/api/tenant/**
+
+        - id: nexus-session-test
+          uri: http://127.0.0.1:19999
+          predicates:
+            - Path=/api/session/**
+
+        - id: nexus-agent-test
+          uri: http://127.0.0.1:19999
+          predicates:
+            - Path=/api/agent/**
+
+        - id: nexus-knowledge-test
+          uri: http://127.0.0.1:19999
+          predicates:
+            - Path=/api/knowledge/**
+
+nexus:
+  jwt:
+    secret: test-jwt-secret-key-for-nexus-gateway-testing-only-32chars
+    expiration-ms: 7200000
+  gateway:
+    white-list:
+      - /api/auth/**
+      - /actuator/health
+
+logging:
+  level:
+    tech.nexus.gateway: DEBUG
