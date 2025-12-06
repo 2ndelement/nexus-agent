@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: nexus-tenant
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/nexus_agent?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: nexus
+    password: nexus_pass
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: auto
+
+server:
+  port: 8003
+
+logging:
+  level:
+    tech.nexus: DEBUG
