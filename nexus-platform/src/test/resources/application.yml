@@ -1,0 +1,42 @@
+server:
+  port: 8005
+
+spring:
+  application:
+    name: nexus-platform
+
+  rabbitmq:
+    host: 127.0.0.1
+    port: 5672
+    username: guest
+    password: guest
+
+nexus:
+  platform:
+    qq:
+      enabled: false
+      app-id: test-app-id
+      app-secret: test-app-secret
+      intents: 33558528
+      gateway-url: wss://api.sgroup.qq.com/websocket/
+      api-base-url: https://api.sgroup.qq.com
+      token-url: https://bots.qq.com/app/getAppAccessToken
+      heartbeat-ratio: 0.9
+      reconnect-interval: 5
+      token-refresh-advance: 300
+    webchat:
+      enabled: true
+      allowed-origins: "*"
+      websocket-path: /ws/webchat
+      max-message-size: 65536
+
+nexus:
+  mq:
+    exchange:
+      platform-events: nexus.platform.events
+    queue:
+      inbound-messages: nexus.platform.inbound
+      outbound-messages: nexus.platform.outbound
+    routing-key:
+      inbound: platform.message.inbound
+      outbound: platform.message.outbound

@@ -1,0 +1,67 @@
+server:
+  port: 8005
+
+spring:
+  application:
+    name: nexus-platform
+
+  # RabbitMQ 配置
+  rabbitmq:
+    host: ${RABBITMQ_HOST:127.0.0.1}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    virtual-host: ${RABBITMQ_VHOST:/}
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 10
+
+# Nexus Platform 配置
+nexus:
+  platform:
+    # QQ机器人适配器配置
+    qq:
+      enabled: ${QQ_ENABLED:false}
+      app-id: ${QQ_APP_ID:}
+      app-secret: ${QQ_APP_SECRET:}
+      # intents: 33554432 = 1<<25 GROUP_AND_C2C_EVENT (群聊+单聊)
+      #          4096     = 1<<12 DIRECT_MESSAGE (频道私信)
+      #          1073741824 = 1<<30 PUBLIC_GUILD_MESSAGES (公域频道@消息)
+      intents: ${QQ_INTENTS:33558528}  # GROUP_AND_C2C_EVENT | DIRECT_MESSAGE
+      gateway-url: ${QQ_GATEWAY_URL:wss://api.sgroup.qq.com/websocket/}
+      api-base-url: ${QQ_API_BASE_URL:https://api.sgroup.qq.com}
+      token-url: ${QQ_TOKEN_URL:https://bots.qq.com/app/getAppAccessToken}
+      # 心跳超时倍数（heartbeat_interval * 0.9）
+      heartbeat-ratio: 0.9
+      # 断线重连间隔（秒）
+      reconnect-interval: 5
+      # AccessToken 提前刷新时间（秒）
+      token-refresh-advance: 300
+
+    # WebChat适配器配置
+    webchat:
+      enabled: ${WEBCHAT_ENABLED:true}
+      # 允许的跨域来源
+      allowed-origins: ${WEBCHAT_ALLOWED_ORIGINS:*}
+      # WebSocket 端点路径
+      websocket-path: /ws/webchat
+      # 消息最大长度（字节）
+      max-message-size: 65536
+
+# RabbitMQ Exchange & Queue 配置
+nexus:
+  mq:
+    exchange:
+      platform-events: nexus.platform.events
+    queue:
+      inbound-messages: nexus.platform.inbound
+      outbound-messages: nexus.platform.outbound
+    routing-key:
+      inbound: platform.message.inbound
+      outbound: platform.message.outbound
+
+logging:
+  level:
+    tech.nexus.platform: DEBUG
+    org.springframework.web.socket: INFO
