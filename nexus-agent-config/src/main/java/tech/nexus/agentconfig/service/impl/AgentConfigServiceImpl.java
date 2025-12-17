@@ -83,15 +83,22 @@ public class AgentConfigServiceImpl implements AgentConfigService {
 
     @Override
     public Page<AgentConfigVO> list(Long tenantId, String name, int page, int size) {
-        LambdaQueryWrapper<AgentConfig> wrapper = new LambdaQueryWrapper<AgentConfig>()
+        // count 不带 ORDER BY（H2/MySQL 兼容）
+        LambdaQueryWrapper<AgentConfig> countWrapper = new LambdaQueryWrapper<AgentConfig>()
+                .eq(AgentConfig::getTenantId, tenantId)
+                .like(StringUtils.hasText(name), AgentConfig::getName, name);
+        long total = agentConfigMapper.selectCount(countWrapper);
+
+        // 数据查询：带 ORDER BY + 手动 LIMIT/OFFSET
+        LambdaQueryWrapper<AgentConfig> dataWrapper = new LambdaQueryWrapper<AgentConfig>()
                 .eq(AgentConfig::getTenantId, tenantId)
                 .like(StringUtils.hasText(name), AgentConfig::getName, name)
-                .orderByDesc(AgentConfig::getUpdateTime);
+                .orderByDesc(AgentConfig::getUpdateTime)
+                .last("LIMIT " + size + " OFFSET " + ((page - 1) * size));
+        List<AgentConfig> records = agentConfigMapper.selectList(dataWrapper);
 
-        Page<AgentConfig> entityPage = agentConfigMapper.selectPage(new Page<>(page, size), wrapper);
-
-        Page<AgentConfigVO> voPage = new Page<>(entityPage.getCurrent(), entityPage.getSize(), entityPage.getTotal());
-        voPage.setRecords(entityPage.getRecords().stream().map(this::toVO).collect(Collectors.toList()));
+        Page<AgentConfigVO> voPage = new Page<>(page, size, total);
+        voPage.setRecords(records.stream().map(this::toVO).collect(Collectors.toList()));
         return voPage;
     }
 
