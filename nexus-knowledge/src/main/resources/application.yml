@@ -1,0 +1,26 @@
+server:
+  port: 8007
+
+spring:
+  application:
+    name: nexus-knowledge
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/nexus_agent?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: nexus
+    password: nexus_pass
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis-plus:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: tech.nexus.knowledge.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    db-config:
+      id-type: auto
+
+logging:
+  level:
+    tech.nexus: DEBUG
+    com.baomidou.mybatisplus: WARN
