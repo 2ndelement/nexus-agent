@@ -1,6 +1,7 @@
 -- H2 测试库建表脚本（兼容 H2 MODE=MySQL）
 DROP TABLE IF EXISTS kb_agent_binding;
 DROP TABLE IF EXISTS kb_permission;
+DROP TABLE IF EXISTS document_chunk;
 DROP TABLE IF EXISTS document;
 DROP TABLE IF EXISTS knowledge_base;
 
@@ -33,6 +34,17 @@ CREATE TABLE document (
     update_time  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE document_chunk (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    doc_id      BIGINT NOT NULL,
+    kb_id       BIGINT NOT NULL,
+    tenant_id   BIGINT NOT NULL,
+    chunk_index INT NOT NULL,
+    content     CLOB NOT NULL,
+    char_count  INT,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE kb_permission (
     id          BIGINT AUTO_INCREMENT PRIMARY KEY,
     tenant_id   BIGINT NOT NULL,
@@ -51,3 +63,4 @@ CREATE TABLE kb_agent_binding (
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (kb_id, agent_id)
 );
+

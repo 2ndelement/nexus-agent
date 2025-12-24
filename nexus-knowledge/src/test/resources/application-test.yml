@@ -8,10 +8,19 @@ spring:
     init:
       mode: always
       schema-locations: classpath:db/schema-h2.sql
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
 
 mybatis-plus:
   configuration:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    map-underscore-to-camel-case: true
   global-config:
     db-config:
       id-type: auto
+
+nexus:
+  knowledge:
+    upload-dir: /tmp/nexus-knowledge-test-uploads

@@ -9,6 +9,10 @@ spring:
     username: nexus
     password: nexus_pass
     driver-class-name: com.mysql.cj.jdbc.Driver
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
 
 mybatis-plus:
   mapper-locations: classpath:mapper/*.xml
@@ -19,6 +23,10 @@ mybatis-plus:
   global-config:
     db-config:
       id-type: auto
+
+nexus:
+  knowledge:
+    upload-dir: /AstrBot/data/workspace/nexus-agent/data/uploads
 
 logging:
   level:
