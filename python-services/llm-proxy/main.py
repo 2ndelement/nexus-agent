@@ -1,0 +1,79 @@
+"""
+main.py — LLM Proxy FastAPI 应用入口
+
+服务端口：8010
+"""
+from __future__ import annotations
+
+import logging
+
+import uvicorn
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.api.v1.completions import router as completions_router
+from app.api.v1.stats import router as stats_router
+from app.schemas import HealthResponse
+
+# ─────────────────────────── 日志 ───────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+# ─────────────────────────── 应用 ───────────────────────────
+app = FastAPI(
+    title="NexusAgent — LLM Proxy",
+    version="0.1.0",
+    description=(
+        "LLM 统一代理服务：OpenAI 协议兼容 · 多模型路由 · Token 统计\n\n"
+        "默认模型：`MiniMax-M2.5-highspeed`（base_url: https://copilot.lab.2ndelement.tech/v1）"
+    ),
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
+
+# CORS（开发环境宽松，生产由 Gateway 控制）
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ─────────────────────────── 路由 ───────────────────────────
+app.include_router(completions_router, prefix="/v1", tags=["completions"])
+app.include_router(stats_router, prefix="/v1", tags=["stats"])
+
+
+@app.get("/health", response_model=HealthResponse, tags=["meta"])
+async def health() -> HealthResponse:
+    """健康检查接口，供 K8s/Docker 探针使用。"""
+    return HealthResponse()
+
+
+@app.get("/v1/models", tags=["meta"], summary="列出已配置的模型")
+async def list_models() -> dict:
+    """返回当前 proxy 配置的所有模型名称列表。"""
+    from app.config import settings
+    return {
+        "object": "list",
+        "data": [
+            {"id": m, "object": "model", "owned_by": "llm-proxy"}
+            for m in settings.list_models()
+        ],
+    }
+
+
+# ─────────────────────────── 启动 ───────────────────────────
+if __name__ == "__main__":
+    from app.config import settings
+
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=settings.llm_proxy_port,
+        reload=False,
+        log_level=settings.log_level.lower(),
+    )
