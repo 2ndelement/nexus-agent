@@ -549,3 +549,123 @@ redis-server --daemonize yes --port 6379
 mysql -u root -e "CREATE USER IF NOT EXISTS 'nexus'@'%' IDENTIFIED BY 'nexus_pass';"
 mysql -u root -e "GRANT ALL PRIVILEGES ON nexus_agent.* TO 'nexus'@'%'; FLUSH PRIVILEGES;"
 ```
+
+---
+
+## 11. Agent Skill 系统设计
+
+> 对标 `/root/.agents/skills` 规范，用户可自定义 Skill
+
+### 11.1 Skill 目录结构
+
+```
+Skill 结构 (对标 .agent/skills):
+  {skill-name}/
+  ├── SKILL.md              # 必需，YAML frontmatter + Markdown 说明
+  ├── scripts/              # 可选，可执行脚本 (Python/Bash)
+  ├── references/           # 可选，按需加载的参考文档
+  └── assets/               # 可选，输出中使用的资源文件
+```
+
+**SKILL.md 格式:**
+```yaml
+---
+name: skill-name
+description: "功能说明。适用场景。触发关键词。"
+---
+# 主体内容 (Markdown)
+```
+
+### 11.2 在 NexusAgent 中的实现
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    nexus-agent-config                       │
+│                      (Agent 配置服务)                        │
+├─────────────────────────────────────────────────────────────┤
+│  Skill 存储层                                              │
+│  ┌─────────────┐    ┌─────────────┐                      │
+│  │   MySQL      │    │   MinIO      │                      │
+│  │  元数据表     │    │  SKILL.md    │                      │
+│  │  name/desc  │    │  scripts/    │                      │
+│  │  tenant_id  │    │  assets/     │                      │
+│  └─────────────┘    └─────────────┘                      │
+├─────────────────────────────────────────────────────────────┤
+│  Skill 运行时                                               │
+│  ┌─────────────┐    ┌─────────────┐                      │
+│  │  RAG 匹配    │───▶│ Agent 注入   │                      │
+│  │ (description)│    │ SystemPrompt │                      │
+│  └─────────────┘    └─────────────┘                      │
+├─────────────────────────────────────────────────────────────┤
+│  Skill 执行层                                               │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │              tool-registry                             ││
+│  │   scripts/ → 注册为 Agent Tool → LangGraph 执行        ││
+│  └─────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 11.3 数据模型
+
+```sql
+-- Skill 元数据表
+CREATE TABLE skill (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    tenant_id BIGINT NOT NULL,
+    name VARCHAR(64) NOT NULL,
+    description TEXT NOT NULL,  -- 用于 RAG 匹配
+    file_path VARCHAR(255) NOT NULL,  -- MinIO 中的 SKILL.md 路径
+    enabled BOOLEAN DEFAULT TRUE,
+    created_by BIGINT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_tenant_name (tenant_id, name),
+    INDEX idx_description_tenant (tenant_id, description(100))
+);
+
+-- Skill 脚本文件表
+CREATE TABLE skill_script (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    skill_id BIGINT NOT NULL,
+    script_name VARCHAR(128) NOT NULL,
+    script_type VARCHAR(16) NOT NULL,  -- python, bash
+    file_path VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (skill_id) REFERENCES skill(id) ON DELETE CASCADE
+);
+```
+
+### 11.4 触发流程
+
+```
+用户输入: "帮我查一下天气"
+    ↓
+Agent 分析意图 (LLM)
+    ↓
+RAG 检索 Skill (匹配 description)
+    ↓
+匹配到 "weather-query" Skill
+    ↓
+加载 SKILL.md 内容
+    ↓
+注入到 Agent System Prompt
+    ↓
+执行 Skill (调用 tool-registry 中的天气工具)
+    ↓
+返回结果
+```
+
+### 11.5 配置项
+
+```yaml
+nexus:
+  agent-config:
+    skill:
+      enabled: true
+      storage:
+        minio:
+          bucket: skills
+      matching:
+        top-k: 3
+        threshold: 0.7
+```
