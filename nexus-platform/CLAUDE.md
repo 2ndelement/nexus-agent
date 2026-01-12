@@ -1,123 +1,197 @@
-# CLAUDE.md — nexus-platform
+# NexusPlatform 开发指南
 
-> 本文件由帕托莉维护，Claude Code 必须在开始前完整阅读。
+## 适配器概览
 
----
-
-## 服务职责
-
-`nexus-platform` 是平台管理服务（超级管理员后台），负责：
-1. 平台级用户管理（超管账户，独立于租户体系）
-2. 租户的开通、审批、禁用（平台维度）
-3. 全局系统配置（LLM 接入配置、功能开关）
-4. 平台级监控数据汇总（各租户用量概览）
-5. 公告/通知管理
-
-**访问权限：** 只有 `ROLE_PLATFORM_ADMIN` 才能访问此服务，普通租户用户无权限。
+当前实现两个适配器：
+- **WebChat**：Web 网页聊天（Vue3 前端）
+- **QQ 机器人**：QQ 官方机器人（基于 QQ Open API v2）
 
 ---
 
-## 技术约束
+## QQ 机器人适配器开发文档
 
-| 约束 | 说明 |
+### 快速开始
+
+#### 1. 接入凭证
+
+| 字段 | 说明 |
 |------|------|
-| **框架** | Spring Boot 3.x, MyBatis-Plus |
-| **依赖** | nexus-common |
-| **数据库** | MySQL 127.0.0.1:3306/nexus_agent |
-| **安全** | 所有接口额外校验 ROLE_PLATFORM_ADMIN（双重保障，Gateway + 服务层） |
-| **端口** | 8009 |
+| AppID | 机器人 ID，开放平台获取 |
+| AppSecret | 机器人密钥 |
+| AccessToken | 调用 API 的凭证，有效期 7200 秒 |
+
+获取方式：
+```bash
+# 获取 AccessToken
+curl -X POST 'https://bots.qq.com/app/getAppAccessToken' \
+  -H 'Content-Type: application/json' \
+  -d '{"appId": "YOUR_APP_ID", "clientSecret": "YOUR_CLIENT_SECRET"}'
+```
+
+#### 2. 事件接收方式
+
+支持两种方式：
+- **Webhook**：HTTP 回调，需配置回调地址（端口 80/443/8080/8443）
+- **WebSocket**：长连接，需实现 Gateway 协议
+
+推荐 WebSocket 方式，更稳定。
+
+#### 3. WebSocket 接入流程
+
+```
+Step 1: 获取 Gateway 地址
+  GET https://api.sgroup.qq.com/gateway/bot
+  
+Step 2: 建立 WSS 长连接
+  wss://api.sgroup.qq.com/websocket/
+  
+Step 3: 收到 Hello (op=10)，记录 heartbeat_interval
+  
+Step 4: 鉴权 (op=2)
+  {
+    "op": 2,
+    "d": {
+      "token": "QQBot YOUR_ACCESS_TOKEN",
+      "intents": 513,  // 需订阅的事件
+      "shard": [0, 1],
+      "properties": {...}
+    }
+  }
+  
+Step 5: 收到 Ready (op=0, t="READY")，连接成功
+
+Step 6: 定时心跳 (op=1)
+```
+
+### 核心 API
+
+#### 发送消息
+
+| 场景 | HTTP URL | 说明 |
+|------|----------|------|
+| 单聊 | POST /v2/users/{openid}/messages | 发送给用户 |
+| 群聊 | POST /v2/groups/{group_openid}/messages | 发送给群 |
+| 子频道 | POST /channels/{channel_id}/messages | 频道消息 |
+| 频道私信 | POST /dms/{guild_id}/messages | 频道私信 |
+
+请求参数：
+```json
+{
+  "msg_type": 0,        // 0=文本, 2=markdown, 3=ark, 4=embed, 7=media
+  "content": "消息内容",
+  "markdown": {...},    // 可选，markdown 消息
+  "keyboard": {...},    // 可选，按钮消息
+  "ark": {...}          // 可选，卡片消息
+}
+```
+
+### Intents 事件订阅
+
+| 事件 | intents 值 | 说明 |
+|------|-----------|------|
+| GUILDS | 1 << 0 | 频道事件 |
+| GUILD_MEMBERS | 1 << 1 | 成员事件 |
+| GUILD_MESSAGES | 1 << 9 | 频道消息（私域） |
+| DIRECT_MESSAGE | 1 << 12 | 私信消息 |
+| GROUP_AND_C2C_EVENT | 1 << 25 | 群聊/单聊事件 |
+| INTERACTION | 1 << 26 | 互动事件 |
+| PUBLIC_GUILD_MESSAGES | 1 << 30 | 公域频道消息 |
+
+常用组合：
+- 接收@机器人消息：`1 << 30` = 1073741824
+- 接收群聊@消息：`1 << 25` = 33554432
+- 接收用户私信：`1 << 12` = 4096
+
+### 消息类型
+
+| msg_type | 类型 | 说明 |
+|----------|------|------|
+| 0 | text | 纯文本 |
+| 2 | markdown | Markdown 格式 |
+| 3 | ark | JSON 结构化消息 |
+| 4 | embed | 嵌入消息 |
+| 7 | media | 富媒体 |
+
+### 错误码
+
+| code | message | 说明 |
+|------|---------|------|
+| 22009 | msg limit exceed | 消息发送超频 |
+| 304082 | upload media info fail | 富媒体上传失败 |
+| 304083 | convert media info fail | 富媒体转换失败 |
+
+### SDK 参考
+
+官方 SDK：
+- Go: [botgo](https://github.com/tencent-connect/botgo)
+- Python: [botpy](https://github.com/tencent-connect/botpy)
+- NodeJS: [bot-node-sdk](https://github.com/tencent-connect/bot-node-sdk)
 
 ---
 
-## 数据模型
+## 开发约定
 
-```sql
--- 全局系统配置
-CREATE TABLE `system_config` (
-  `id`          BIGINT AUTO_INCREMENT PRIMARY KEY,
-  `config_key`  VARCHAR(100) NOT NULL UNIQUE COMMENT '配置键',
-  `config_value` TEXT COMMENT '配置值（JSON/字符串）',
-  `description` VARCHAR(500),
-  `is_public`   TINYINT DEFAULT 0 COMMENT '1=对租户可见',
-  `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+### 目录结构
 
--- 公告
-CREATE TABLE `announcement` (
-  `id`          BIGINT AUTO_INCREMENT PRIMARY KEY,
-  `title`       VARCHAR(200) NOT NULL,
-  `content`     TEXT NOT NULL,
-  `level`       VARCHAR(20) DEFAULT 'INFO' COMMENT 'INFO/WARNING/URGENT',
-  `target`      VARCHAR(20) DEFAULT 'ALL' COMMENT 'ALL/PLAN:PRO/TENANT:xxx',
-  `status`      TINYINT DEFAULT 1 COMMENT '1=发布 0=草稿',
-  `publish_time` DATETIME,
-  `expire_time` DATETIME,
-  `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```
+nexus-platform/
+├── src/main/java/tech/nexus/platform/
+│   ├── NexusPlatformApplication.java
+│   ├── adapter/
+│   │   ├── webchat/          # WebChat 适配器
+│   │   │   ├── controller/
+│   │   │   ├── handler/
+│   │   │   └── config/
+│   │   └── qq/               # QQ 机器人适配器
+│   │       ├── controller/   # Webhook 回调
+│   │       ├── client/       # WebSocket 客户端
+│   │       ├── handler/      # 事件处理器
+│   │       ├── service/      # 消息发送服务
+│   │       └── config/
+│   └── common/               # 通用组件
+└── src/main/resources/
+    └── application.yml
+```
+
+### 配置项
+
+```yaml
+nexus:
+  platform:
+    qq:
+      enabled: true
+      app-id: ${QQ_APP_ID}
+      app-secret: ${QQ_APP_SECRET}
+      intents: 33554432  # GROUP_AND_C2C_EVENT
+    webchat:
+      enabled: true
+```
+
+### 消息流程
+
+```
+用户消息 -> QQ/QQ频道/Web
+    ↓
+WebSocket/HTTP Webhook
+    ↓
+消息事件处理器 (MessageHandler)
+    ↓
+转换为统一消息格式 (PlatformMessage)
+    ↓
+发送到消息队列 (RabbitMQ)
+    ↓
+agent-engine 消费并处理
+    ↓
+返回结果
+    ↓
+通过对应平台适配器发送回复
 ```
 
 ---
 
-## 当前任务
+## 参考文档
 
-### Task-11: 实现 nexus-platform 基础功能
-
-**API 接口（全部需要 ROLE_PLATFORM_ADMIN）：**
-
-```
-# 租户管理
-GET    /api/platform/tenants                    所有租户列表（分页、可按名称/套餐筛选）
-GET    /api/platform/tenants/{id}               租户详情（含用量概览）
-PUT    /api/platform/tenants/{id}/status        启用/禁用租户
-POST   /api/platform/tenants                    手动开通租户
-
-# 系统配置
-GET    /api/platform/config                     所有配置列表
-PUT    /api/platform/config/{key}               更新配置
-GET    /api/platform/config/public              公开配置（无需管理员权限，租户可查）
-
-# 公告
-POST   /api/platform/announcements              创建公告
-GET    /api/platform/announcements              公告列表
-PUT    /api/platform/announcements/{id}         更新
-DELETE /api/platform/announcements/{id}         删除
-
-# 数据概览（Dashboard）
-GET    /api/platform/dashboard                  全局统计（租户数、DAU、总Token消耗等）
-```
-
-**常用系统配置键（预置）：**
-
-| config_key | 说明 | 默认值 |
-|-----------|------|--------|
-| `llm.default_model` | 默认 LLM 模型 | `MiniMax-M2.5-highspeed` |
-| `llm.api_base_url` | LLM API 基础地址 | `https://copilot.lab.2ndelement.tech/v1` |
-| `feature.registration_enabled` | 是否开放注册 | `true` |
-| `feature.free_plan_enabled` | 是否提供免费套餐 | `true` |
-| `upload.max_file_size_mb` | 文档上传大小上限 | `50` |
-
----
-
-## 测试要求
-
-- [ ] 普通租户 Token 访问平台接口 → 403 Forbidden
-- [ ] 平台管理员可以禁用租户
-- [ ] 系统配置更新后立即生效（Redis 缓存失效）
-- [ ] Dashboard 接口返回格式正确
-
----
-
-## Code Review 检查清单
-
-- [ ] 所有接口在 Controller 层再次校验 PLATFORM_ADMIN 角色（不只依赖 Gateway）
-- [ ] 禁用租户时发送系统通知（可以只记日志，Phase 2 再接消息队列）
-- [ ] 系统配置变更有操作审计日志
-- [ ] Dashboard 数据可以允许有 1-5 分钟缓存（高频查询）
-
----
-
-## 注意事项
-
-1. 平台管理员账户在初始化时预置（数据库初始化脚本），不通过注册创建
-2. 此服务在 Phase 1 中**优先级较低**，可在其他模块完成后实现
-3. 先设计接口，等帕托莉确认再编码
+- [QQ 机器人官方文档](https://bot.q.qq.com/wiki/develop/api-v2/)
+- [接口调用与鉴权](https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/interface-framework/api-use.html)
+- [事件订阅](https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/interface-framework/event-emit.html)
+- [发送消息](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/send-receive/send.html)
