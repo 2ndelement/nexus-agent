@@ -1,0 +1,5 @@
+fastapi>=0.104
+uvicorn>=0.23
+aiodocker>=5.0
+pydantic>=2.0
+pydantic-settings>=2.0

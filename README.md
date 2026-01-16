@@ -314,3 +314,71 @@ builder.add_edge("call_llm", END)
 
 *文档版本：v1.0*
 *最后更新：2026-03-17*
+
+---
+
+## 8. Embed Worker (embed-worker)
+
+**职责：** 异步文档向量化 — 消费 RabbitMQ 消息 → 调用 SentenceTransformer → 写入 ChromaDB
+
+**技术栈：** Python + aio-pika + chromadb + sentence-transformers
+
+**消息队列：**
+- 消费队列：`nexus.embed.tasks`
+- 消息格式：tenant_id, kb_id, doc_id, chunks[]
+
+**端口：** N/A（纯消费者）
+
+---
+
+## 9. Sandbox Service (sandbox-service)
+
+**职责：** 隔离容器中执行任意代码（Python/Bash）
+
+**技术栈：** Python + FastAPI + aiodocker (Docker)
+
+**安全特性：**
+- 网络隔离（容器无外网访问）
+- 资源限制：内存 256MB，CPU 0.5 核
+- 超时控制：最长 120 秒
+- 容器级隔离，每次执行创建临时容器
+
+**端口：** 8020
+
+**核心 API：**
+```python
+POST /execute
+{
+    "code": "print('hello')",
+    "language": "python",  # or "bash"
+    "timeout": 30
+}
+```
+
+**在 Tool Registry 中注册为 `sandbox_execute` 工具**
+
+---
+
+## 10. 服务端口汇总（更新版）
+
+| 服务 | 端口 | 协议 |
+|------|------|------|
+| Gateway | 8080 | HTTP |
+| Auth | 8005 | HTTP |
+| Tenant | 8002 | HTTP |
+| Session | 8004 | HTTP |
+| Knowledge | 8007 | HTTP |
+| Agent Config | 8006 | HTTP |
+| Billing | 8009 | HTTP |
+| Agent Engine | 8001 | HTTP |
+| LLM Proxy | 8010 | HTTP |
+| RAG Service | 8003 | HTTP |
+| Tool Registry | 8011 | HTTP |
+| Memory Service | 8012 | HTTP |
+| Sandbox Service | 8020 | HTTP |
+| Embed Worker | N/A | RabbitMQ |
+
+---
+
+*文档版本：v1.1*
+*最后更新：2026-03-17*
