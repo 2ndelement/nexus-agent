@@ -2,9 +2,9 @@ spring:
   application:
     name: nexus-agent-config
   datasource:
-    url: jdbc:mysql://127.0.0.1:3306/nexus_agent?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowMultiQueries=true
-    username: root
-    password: root
+    url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/nexus_agent}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowMultiQueries=true
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:root}
     driver-class-name: com.mysql.cj.jdbc.Driver
   data:
     redis:

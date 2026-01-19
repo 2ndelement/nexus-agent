@@ -152,6 +152,19 @@ Query → BM25 检索 (sparse) → 向量检索 (dense)
 
 **职责：** LangGraph 图执行、工具调用、LLM 调用
 
+**Tool Calling 架构（v2 优化新增）：**
+
+```
+START → call_llm → [should_continue] ─── has tool_calls ──→ tool_call_node ─┐
+                         │                                                    │
+                         └── no tool_calls → END               call_llm ←─────┘
+```
+
+- `call_llm_node`：调用 LLM，绑定 calculator / web_search / sandbox_execute 工具定义
+- `tool_call_node`：解析 AIMessage.tool_calls，通过 HTTP 调用 tool-registry 执行
+- `should_continue`：条件路由，有 tool_calls 则循环，否则结束
+- `max_tool_iterations`：防止无限循环的安全阀
+
 **核心架构：**
 ```python
 # Agent 状态定义
@@ -324,42 +337,27 @@ async def stream_chat(
 
 ### 5.1 Docker Compose 开发环境
 
-```yaml
-# 核心服务
-services:
-  # Java Gateway
-  nexus-gateway:
-    build: ./nexus-gateway
-    ports:
-      - "8080:8080"
-    environment:
-      - NACOS_ADDR=nacos:8848
+完整的 `docker-compose.yml` 已在项目根目录提供，包含 **19 个服务**：
 
-  # Python Agent
-  agent-engine:
-    build: ./python-services/agent-engine
-    ports:
-      - "8001:8001"
-    environment:
-      - MYSQL_URL=mysql:3306
-      - REDIS_URL=redis:6379
+| 分类 | 服务 | 端口 |
+|------|------|------|
+| 基础设施 | MySQL 8.0, Redis 7, RabbitMQ 3, ChromaDB | 3306, 6379, 5672/15672, 8000 |
+| Java 微服务 | gateway, auth, tenant, session, platform, agent-config, knowledge, billing | 8080, 8002-8008 |
+| Python 微服务 | agent-engine, llm-proxy, tool-registry, memory, rag, embed-worker, sandbox | 8001, 8010-8013, 8020 |
 
-  # 基础设施
-  mysql:
-    image: mysql:8.0
-    ports:
-      - "3306:3306"
+```bash
+# 启动
+cp .env.example .env   # 填入实际配置
+docker compose up -d
 
-  milvus:
-    image: milvusdb/milvus:v2.4.0
-    ports:
-      - "19530:19530"
-
-  rabbitmq:
-    image: rabbitmq:3-management
-    ports:
-      - "5672:5672"
+# 查看状态
+docker compose ps
 ```
+
+**关键设计：**
+- YAML Anchor (`x-java-common`, `x-python-common`) 复用公共配置
+- 中间件 healthcheck → 确保服务启动顺序
+- `Dockerfile.java` 多阶段构建 → 镜像约 200MB
 
 ### 5.2 Kubernetes 生产环境 (规划)
 
@@ -393,9 +391,44 @@ services:
 
 ---
 
+## 5.3 端口分配总表
+
+| 端口 | 服务 | 语言 | 说明 |
+|------|------|------|------|
+| 8080 | nexus-gateway | Java | API 网关统一入口 |
+| 8001 | agent-engine | Python | LangGraph Agent 引擎 |
+| 8002 | nexus-auth | Java | 认证/登录/注册 |
+| 8003 | nexus-tenant | Java | 租户管理 |
+| 8004 | nexus-session | Java | 会话/消息管理 |
+| 8005 | nexus-platform | Java | 平台适配器 (QQ/WebChat) |
+| 8006 | nexus-agent-config | Java | Agent 配置 & 技能 |
+| 8007 | nexus-knowledge | Java | 知识库/文档管理 |
+| 8008 | nexus-billing | Java | 计费/配额 |
+| 8010 | llm-proxy | Python | LLM 多模型路由 |
+| 8011 | tool-registry | Python | 工具注册与执行 |
+| 8012 | memory-service | Python | 会话记忆 |
+| 8013 | rag-service | Python | RAG 检索 |
+| 8020 | sandbox-service | Python | 代码沙箱执行 |
+| — | embed-worker | Python | 向量化消费者（无 HTTP 端口） |
+
+---
+
 ## 6. 安全性设计
 
 ### 6.1 认证流程
+
+**JWT 黑名单机制（v2 优化新增）：**
+
+```
+登出 → Auth 写入 Redis: nexus:blacklist:{jti} = "1" (TTL = Token剩余有效期)
+     ↓
+后续请求 → Gateway AuthGlobalFilter 解析 jti → 查 Redis 黑名单
+     ↓
+命中 → 401 "Token 已失效（已登出）"
+未命中 → 放行
+```
+
+#### 6.1.1 原认证流程
 
 ```
 用户登录 → Auth Service → 验证账号密码 
@@ -431,7 +464,7 @@ services:
 | HTTPS only | 生产环境强制 HTTPS |
 | JWT 签名 | HS256/RSA256 |
 | Token 过期 | Access Token 2h 强制刷新 |
-| 限流 | Sentinel 每租户限流 |
+| 限流 | Redis 计数限流（Billing 服务已实现），Sentinel 为规划项 |
 | 日志审计 | 记录所有敏感操作 |
 
 ---
@@ -669,3 +702,27 @@ nexus:
         top-k: 3
         threshold: 0.7
 ```
+
+
+---
+
+## 优化历史
+
+### v2 优化（2026-03-17）
+
+详见 [OPTIMIZATION_PLAN.md](./OPTIMIZATION_PLAN.md)
+
+**P0 关键修复：**
+1. ✅ Knowledge → Embed Worker 消息链补全（RabbitMQ）
+2. ✅ Gateway JWT 黑名单校验（Redis 联查 `nexus:blacklist:{jti}`）
+3. ✅ Agent Engine Tool Calling 节点（LangGraph 条件路由循环）
+
+**P1 安全合规：**
+4. ✅ Gateway 路由补全（5 → 12 条）
+5. ✅ rag-service 端口冲突修复（8003 → 8013）
+6. ✅ 敏感配置环境变量化 + `.env.example`
+
+**P2 工程化：**
+7. ✅ Docker Compose 全量编排（19 服务）
+8. ✅ 补充测试（embed-worker / sandbox / gateway 黑名单 / tool calling）
+9. ✅ 架构文档同步更新

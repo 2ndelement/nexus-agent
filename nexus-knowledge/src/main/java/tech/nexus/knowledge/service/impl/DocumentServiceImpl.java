@@ -20,6 +20,7 @@ import tech.nexus.knowledge.entity.KnowledgeBase;
 import tech.nexus.knowledge.mapper.DocumentChunkMapper;
 import tech.nexus.knowledge.mapper.DocumentMapper;
 import tech.nexus.knowledge.mapper.KnowledgeBaseMapper;
+import tech.nexus.knowledge.mq.EmbedTaskPublisher;
 import tech.nexus.knowledge.service.DocumentService;
 import tech.nexus.knowledge.service.impl.KnowledgeBaseServiceImpl;
 
@@ -62,6 +63,7 @@ public class DocumentServiceImpl implements DocumentService {
     private final DocumentChunkMapper chunkMapper;
     private final KnowledgeBaseMapper kbMapper;
     private final KnowledgeBaseServiceImpl kbService;
+    private final EmbedTaskPublisher embedTaskPublisher;
 
     @Value("${nexus.knowledge.upload-dir:/AstrBot/data/workspace/nexus-agent/data/uploads}")
     private String uploadDir;
@@ -131,6 +133,7 @@ public class DocumentServiceImpl implements DocumentService {
             List<String> chunks = chunkText(text, getChunkSize(kb), getChunkOverlap(kb));
 
             // 批量插入分片
+            List<DocumentChunk> chunkEntities = new ArrayList<>();
             for (int i = 0; i < chunks.size(); i++) {
                 DocumentChunk chunk = new DocumentChunk();
                 chunk.setDocId(doc.getId());
@@ -141,6 +144,7 @@ public class DocumentServiceImpl implements DocumentService {
                 chunk.setCharCount(chunks.get(i).length());
                 chunk.setCreateTime(LocalDateTime.now());
                 chunkMapper.insert(chunk);
+                chunkEntities.add(chunk);
             }
 
             // 更新 document 状态为 DONE
@@ -159,6 +163,10 @@ public class DocumentServiceImpl implements DocumentService {
                     .set(KnowledgeBase::getUpdateTime, LocalDateTime.now()));
 
             log.info("Document[{}] uploaded: kbId={} chunks={}", doc.getId(), kbId, chunks.size());
+
+            // 异步通知 embed-worker 向量化（失败不影响主流程）
+            embedTaskPublisher.publishEmbedTask(
+                    tenantId, kbId, doc.getId(), chunkEntities, safeName);
 
         } catch (Exception e) {
             markFailed(doc.getId(), e.getMessage());

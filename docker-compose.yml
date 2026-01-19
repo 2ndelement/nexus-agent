@@ -1,0 +1,324 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  NexusAgent — Docker Compose (Development)                      ║
+# ║  启动命令: docker compose up -d                                  ║
+# ║  注意：首先复制 .env.example → .env 并填入实际配置                ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+version: "3.9"
+
+x-java-common: &java-common
+  build:
+    context: .
+    dockerfile: Dockerfile.java
+  environment: &java-env
+    MYSQL_URL: jdbc:mysql://mysql:3306/nexus_agent?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    MYSQL_USERNAME: ${MYSQL_USERNAME:-nexus}
+    MYSQL_PASSWORD: ${MYSQL_PASSWORD:-nexus_pass}
+    REDIS_HOST: redis
+    REDIS_PORT: 6379
+    NEXUS_JWT_SECRET: ${NEXUS_JWT_SECRET:-nexus-auth-jwt-secret-key-must-be-at-least-32-characters-long}
+    RABBITMQ_HOST: rabbitmq
+    RABBITMQ_PORT: 5672
+    RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+    RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+  depends_on:
+    mysql:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+  networks:
+    - nexus
+
+x-python-common: &python-common
+  environment: &python-env
+    MYSQL_HOST: mysql
+    MYSQL_PORT: 3306
+    MYSQL_DB: nexus_agent
+    MYSQL_USER: ${MYSQL_USERNAME:-nexus}
+    MYSQL_PASS: ${MYSQL_PASSWORD:-nexus_pass}
+    REDIS_HOST: redis
+    REDIS_PORT: 6379
+    RABBITMQ_HOST: rabbitmq
+    RABBITMQ_PORT: 5672
+    OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+    LLM_MODEL: ${LLM_MODEL:-gpt-4o}
+  depends_on:
+    mysql:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+  networks:
+    - nexus
+
+services:
+  # ═══════════════════ 基础设施 ═══════════════════
+
+  mysql:
+    image: mysql:8.0
+    container_name: nexus-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: nexus_agent
+      MYSQL_USER: ${MYSQL_USERNAME:-nexus}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-nexus_pass}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./sql/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nexus
+
+  redis:
+    image: redis:7-alpine
+    container_name: nexus-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - nexus
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: nexus-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nexus
+
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: nexus-chromadb
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma-data:/chroma/chroma
+    networks:
+      - nexus
+
+  # ═══════════════════ Java 微服务 ═══════════════════
+
+  gateway:
+    <<: *java-common
+    container_name: nexus-gateway
+    build:
+      context: .
+      dockerfile: Dockerfile.java
+      args:
+        MODULE: nexus-gateway
+    ports:
+      - "8080:8080"
+
+  auth:
+    <<: *java-common
+    container_name: nexus-auth
+    build:
+      context: .
+      dockerfile: Dockerfile.java
+      args:
+        MODULE: nexus-auth
+    ports:
+      - "8002:8002"
+
+  tenant:
+    <<: *java-common
+    container_name: nexus-tenant
+    build:
+      context: .
+      dockerfile: Dockerfile.java
+      args:
+        MODULE: nexus-tenant
+    ports:
+      - "8003:8003"
+
+  session:
+    <<: *java-common
+    container_name: nexus-session
+    build:
+      context: .
+      dockerfile: Dockerfile.java
+      args:
+        MODULE: nexus-session
+    ports:
+      - "8004:8004"
+
+  platform:
+    <<: *java-common
+    container_name: nexus-platform
+    build:
+      context: .
+      dockerfile: Dockerfile.java
+      args:
+        MODULE: nexus-platform
+    ports:
+      - "8005:8005"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  agent-config:
+    <<: *java-common
+    container_name: nexus-agent-config
+    build:
+      context: .
+      dockerfile: Dockerfile.java
+      args:
+        MODULE: nexus-agent-config
+    ports:
+      - "8006:8006"
+
+  knowledge:
+    <<: *java-common
+    container_name: nexus-knowledge
+    build:
+      context: .
+      dockerfile: Dockerfile.java
+      args:
+        MODULE: nexus-knowledge
+    ports:
+      - "8007:8007"
+    volumes:
+      - upload-data:/data/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  billing:
+    <<: *java-common
+    container_name: nexus-billing
+    build:
+      context: .
+      dockerfile: Dockerfile.java
+      args:
+        MODULE: nexus-billing
+    ports:
+      - "8008:8008"
+
+  # ═══════════════════ Python 微服务 ═══════════════════
+
+  agent-engine:
+    <<: *python-common
+    container_name: nexus-agent-engine
+    build:
+      context: ./python-services/agent-engine
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      <<: *python-env
+      TOOL_REGISTRY_URL: http://tool-registry:8011
+      SANDBOX_URL: http://sandbox:8020
+      RAG_SERVICE_URL: http://rag-service:8013
+      MEMORY_SERVICE_URL: http://memory-service:8012
+
+  llm-proxy:
+    <<: *python-common
+    container_name: nexus-llm-proxy
+    build:
+      context: ./python-services/llm-proxy
+      dockerfile: Dockerfile
+    ports:
+      - "8010:8010"
+
+  tool-registry:
+    <<: *python-common
+    container_name: nexus-tool-registry
+    build:
+      context: ./python-services/tool-registry
+      dockerfile: Dockerfile
+    ports:
+      - "8011:8011"
+
+  memory-service:
+    <<: *python-common
+    container_name: nexus-memory-service
+    build:
+      context: ./python-services/memory-service
+      dockerfile: Dockerfile
+    ports:
+      - "8012:8012"
+
+  rag-service:
+    <<: *python-common
+    container_name: nexus-rag-service
+    build:
+      context: ./python-services/rag-service
+      dockerfile: Dockerfile
+    ports:
+      - "8013:8013"
+    environment:
+      <<: *python-env
+      CHROMA_HOST: chromadb
+      CHROMA_PORT: 8000
+
+  embed-worker:
+    <<: *python-common
+    container_name: nexus-embed-worker
+    build:
+      context: ./python-services/embed-worker
+      dockerfile: Dockerfile
+    environment:
+      <<: *python-env
+      CHROMA_HOST: chromadb
+      CHROMA_PORT: 8000
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  sandbox-service:
+    <<: *python-common
+    container_name: nexus-sandbox
+    build:
+      context: ./python-services/sandbox-service
+      dockerfile: Dockerfile
+    ports:
+      - "8020:8020"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    privileged: true
+
+volumes:
+  mysql-data:
+  redis-data:
+  rabbitmq-data:
+  chroma-data:
+  upload-data:
+
+networks:
+  nexus:
+    driver: bridge

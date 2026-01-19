@@ -13,6 +13,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 import tech.nexus.common.constant.NexusConstants;
@@ -29,6 +30,7 @@ import java.util.List;
  *   <li>白名单路径 → 直接放行</li>
  *   <li>提取 {@code Authorization: Bearer <token>}</li>
  *   <li>本地验证 Token 有效性（不调用远程）</li>
+ *   <li>检查 JWT jti 是否在 Redis 黑名单中（已登出）</li>
  *   <li>从 Token 提取 {@code tenantId / userId / roles}</li>
  *   <li>注入下游 Header：{@code X-Tenant-Id / X-User-Id / X-Roles}</li>
  * </ol>
@@ -48,6 +50,7 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
 
     private final JwtUtils jwtUtils;
     private final WhiteListConfig whiteListConfig;
+    private final StringRedisTemplate redisTemplate;
 
     @Override
     public int getOrder() {
@@ -87,7 +90,18 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
             return unauthorized(exchange, "Token 解析失败");
         }
 
-        // 4. 提取 claims
+        // 4. 黑名单检查：已登出的 Token 直接拒绝
+        String jti = claims.getId();
+        if (jti != null && !jti.isBlank()) {
+            String blacklistKey = "nexus:blacklist:" + jti;
+            String blocked = redisTemplate.opsForValue().get(blacklistKey);
+            if (blocked != null) {
+                log.warn("token blacklisted: jti={}, path={}", jti, path);
+                return unauthorized(exchange, "Token 已失效（已登出）");
+            }
+        }
+
+        // 5. 提取 claims
         String userId   = claims.get(JwtUtils.CLAIM_USER_ID,   String.class);
         String tenantId = claims.get(JwtUtils.CLAIM_TENANT_ID, String.class);
 
@@ -95,7 +109,7 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         List<String> roles = claims.get(JwtUtils.CLAIM_ROLES, List.class);
         String rolesStr = (roles != null) ? String.join(",", roles) : "";
 
-        // 5. 构造注入了鉴权信息的下游请求
+        // 6. 构造注入了鉴权信息的下游请求
         ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
                 .header(NexusConstants.HEADER_TENANT_ID, tenantId != null ? tenantId : "")
                 .header(HEADER_USER_ID,  userId   != null ? userId   : "")

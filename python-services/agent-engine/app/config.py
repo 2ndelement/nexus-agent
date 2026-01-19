@@ -40,9 +40,16 @@ class Settings(BaseSettings):
     redis_host: str = "127.0.0.1"
     redis_port: int = 6379
 
-    # Service
+    # 内部服务地址
     agent_engine_port: int = 8001
+    tool_registry_url: str = "http://127.0.0.1:8011"
+    sandbox_url: str = "http://127.0.0.1:8020"
+    rag_service_url: str = "http://127.0.0.1:8013"
+    memory_service_url: str = "http://127.0.0.1:8012"
     log_level: str = "INFO"
+
+    # Tool Calling
+    max_tool_iterations: int = 5     # 单轮最大工具调用轮次
 
 
 # 单例

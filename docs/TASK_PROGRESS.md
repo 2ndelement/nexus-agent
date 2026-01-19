@@ -80,3 +80,60 @@
 | llm-proxy | Python | 12 | 8010 |
 | tool-registry | Python | - | 8011 |
 | memory-service | Python | - | 8012 |
+
+
+---
+
+## 系统优化 — v2（2026-03-17）
+
+基于全项目代码审查，识别并修复了 10 个优化项。
+
+### 已完成
+
+| # | 优化项 | 优先级 | 涉及模块 |
+|---|--------|--------|----------|
+| 1 | Knowledge → Embed Worker 消息链补全 | P0 | nexus-knowledge, EmbedTaskPublisher |
+| 2 | Gateway JWT 黑名单校验 | P0 | nexus-gateway, AuthGlobalFilter |
+| 3 | Agent Engine Tool Calling 节点 | P0 | agent-engine (nodes.py, graph.py) |
+| 4 | Gateway 路由补全（5→12条） | P1 | nexus-gateway/application.yml |
+| 5 | rag-service 端口冲突修复（8003→8013） | P1 | rag-service, agent-engine |
+| 6 | 敏感配置环境变量化 | P1 | 6个Java服务yml, .env.example |
+| 7 | Docker Compose 全量编排 | P2 | docker-compose.yml, Dockerfile.java |
+| 8 | 补充测试 | P2 | 4个新测试文件 |
+| 9 | 架构文档同步更新 | P2 | ARCHITECTURE.md |
+| 10 | 优化计划文档 | P2 | OPTIMIZATION_PLAN.md |
+
+### 新增文件
+
+```
+(new) .env.example                          — 环境变量模板
+(new) docker-compose.yml                    — 19服务编排
+(new) Dockerfile.java                       — Java通用多阶段构建
+(new) nexus-knowledge/.../mq/EmbedTaskPublisher.java    — 向量化消息发布
+(new) python-services/agent-engine/tests/test_tool_calling.py
+(new) python-services/embed-worker/tests/test_consumer.py
+(new) python-services/sandbox-service/tests/test_executor.py
+(new) docs/OPTIMIZATION_PLAN.md             — 优化计划文档
+```
+
+### 修改文件
+
+```
+(mod) nexus-gateway/.../AuthGlobalFilter.java           — +黑名单校验
+(mod) nexus-gateway/.../application.yml                 — +Redis配置, +7条路由
+(mod) nexus-gateway/pom.xml                             — +spring-data-redis
+(mod) nexus-gateway/.../AuthGlobalFilterTest.java       — +黑名单测试用例
+(mod) nexus-knowledge/pom.xml                           — +spring-amqp
+(mod) nexus-knowledge/.../application.yml               — +RabbitMQ配置
+(mod) nexus-knowledge/.../DocumentServiceImpl.java      — +向量化消息发送
+(mod) python-services/agent-engine/app/agent/nodes.py   — 重写(+tool calling)
+(mod) python-services/agent-engine/app/agent/graph.py   — 重写(+条件路由)
+(mod) python-services/agent-engine/app/config.py        — +服务地址配置
+(mod) python-services/rag-service/app/config.py         — 端口8003→8013
+(mod) nexus-auth/.../application.yml                    — 环境变量化
+(mod) nexus-tenant/.../application.yml                  — 环境变量化
+(mod) nexus-session/.../application.yml                 — 环境变量化
+(mod) nexus-billing/.../application.yml                 — 环境变量化
+(mod) nexus-agent-config/.../application.yml            — 环境变量化
+(mod) docs/ARCHITECTURE.md                              — 全面更新
+```

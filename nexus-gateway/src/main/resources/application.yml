@@ -4,19 +4,22 @@ server:
 spring:
   application:
     name: nexus-gateway
-  # ── Spring Cloud Gateway 路由配置 ──────────────────────────
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      timeout: 3000ms
+  # ── Spring Cloud Gateway 路由配置 ──────────────────────────────
   cloud:
     gateway:
       # 全局超时（毫秒）
       httpclient:
         connect-timeout: 5000
         response-timeout: 30s
-      # 默认 Filter：去掉请求路径前缀已在各路由中处理
       default-filters:
-        # 保留 SSE 流式传输的 transfer-encoding: chunked（不缓冲）
         - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
       routes:
-        # ── /api/auth/** → nexus-auth (8002)，白名单，不需要 Token ──
+        # ── /api/auth/** → nexus-auth (8002)，白名单 ──
         - id: nexus-auth
           uri: http://127.0.0.1:8002
           predicates:
@@ -24,7 +27,7 @@ spring:
           filters:
             - StripPrefix=0
 
-        # ── /api/tenant/** → nexus-tenant (8003) ─────────────────
+        # ── /api/tenant/** → nexus-tenant (8003) ──
         - id: nexus-tenant
           uri: http://127.0.0.1:8003
           predicates:
@@ -32,7 +35,7 @@ spring:
           filters:
             - StripPrefix=0
 
-        # ── /api/session/** → nexus-session (8004) ───────────────
+        # ── /api/session/** → nexus-session (8004) ──
         - id: nexus-session
           uri: http://127.0.0.1:8004
           predicates:
@@ -40,27 +43,82 @@ spring:
           filters:
             - StripPrefix=0
 
-        # ── /api/agent/** → agent-engine (8001)，支持 SSE ────────
+        # ── /api/platform/** → nexus-platform (8005) ──
+        - id: nexus-platform
+          uri: http://127.0.0.1:8005
+          predicates:
+            - Path=/api/platform/**
+          filters:
+            - StripPrefix=0
+
+        # ── /api/agent-config/** → nexus-agent-config (8006) ──
+        - id: nexus-agent-config
+          uri: http://127.0.0.1:8006
+          predicates:
+            - Path=/api/agent-config/**
+          filters:
+            - StripPrefix=0
+
+        # ── /api/knowledge/** → nexus-knowledge (8007) ──
+        - id: nexus-knowledge
+          uri: http://127.0.0.1:8007
+          predicates:
+            - Path=/api/knowledge/**
+          filters:
+            - StripPrefix=0
+
+        # ── /api/billing/** → nexus-billing (8008) ──
+        - id: nexus-billing
+          uri: http://127.0.0.1:8008
+          predicates:
+            - Path=/api/billing/**
+          filters:
+            - StripPrefix=0
+
+        # ── /api/agent/** → agent-engine (8001)，支持 SSE ──
         - id: nexus-agent-engine
           uri: http://127.0.0.1:8001
           predicates:
             - Path=/api/agent/**
           filters:
             - StripPrefix=0
-          # SSE 流式：不缓冲响应体
           metadata:
             response-timeout: 300000
             connect-timeout: 5000
 
-        # ── /api/knowledge/** → rag-service (8005) ───────────────
-        - id: nexus-knowledge
-          uri: http://127.0.0.1:8005
+        # ── /api/llm/** → llm-proxy (8010) ──
+        - id: nexus-llm-proxy
+          uri: http://127.0.0.1:8010
           predicates:
-            - Path=/api/knowledge/**
+            - Path=/api/llm/**
           filters:
             - StripPrefix=0
 
-# ── JWT 配置（与 nexus-auth 共享同一密钥） ─────────────────────
+        # ── /api/tools/** → tool-registry (8011) ──
+        - id: nexus-tool-registry
+          uri: http://127.0.0.1:8011
+          predicates:
+            - Path=/api/tools/**
+          filters:
+            - StripPrefix=0
+
+        # ── /api/memory/** → memory-service (8012) ──
+        - id: nexus-memory
+          uri: http://127.0.0.1:8012
+          predicates:
+            - Path=/api/memory/**
+          filters:
+            - StripPrefix=0
+
+        # ── /api/rag/** → rag-service (8013) ──
+        - id: nexus-rag
+          uri: http://127.0.0.1:8013
+          predicates:
+            - Path=/api/rag/**
+          filters:
+            - StripPrefix=0
+
+# ── JWT 配置（与 nexus-auth 共享同一密钥） ──────────────────
 nexus:
   jwt:
     secret: ${NEXUS_JWT_SECRET:nexus-auth-jwt-secret-key-must-be-at-least-32-characters-long}

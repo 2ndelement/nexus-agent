@@ -22,12 +22,16 @@ venv/
 Thumbs.db
 
 # Secrets
-.env
 *.key
+
+# Env
+.env
+.env.*
+!.env.example
 
 # Build
 dist/
 build/
 
-# Env
-.env*
+# Generated
+nexus-gateway/META-INF/

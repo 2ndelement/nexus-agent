@@ -5,9 +5,9 @@ spring:
   application:
     name: nexus-session
   datasource:
-    url: jdbc:mysql://127.0.0.1:3306/nexus_agent?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
-    username: nexus
-    password: nexus_pass
+    url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/nexus_agent}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USERNAME:nexus}
+    password: ${MYSQL_PASSWORD:nexus_pass}
     driver-class-name: com.mysql.cj.jdbc.Driver
   data:
     redis:

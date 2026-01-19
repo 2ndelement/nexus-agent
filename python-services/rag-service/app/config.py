@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     )
 
     # Service
-    rag_service_port: int = 8003
+    rag_service_port: int = 8013
     log_level: str = "INFO"
 
     # ChromaDB
