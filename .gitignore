@@ -35,3 +35,7 @@ build/
 
 # Generated
 nexus-gateway/META-INF/
+-e 
+# 外部子项目
+lobehub/
+nexus-webchat/

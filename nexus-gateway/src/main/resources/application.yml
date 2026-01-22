@@ -9,75 +9,96 @@ spring:
       host: ${REDIS_HOST:127.0.0.1}
       port: ${REDIS_PORT:6379}
       timeout: 3000ms
-  # ── Spring Cloud Gateway 路由配置 ──────────────────────────────
+  # ── Nacos 服务发现 ──
   cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        namespace: ${NACOS_NAMESPACE:}
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+
+    # ── Sentinel 限流 ──
+    sentinel:
+      transport:
+        dashboard: ${SENTINEL_DASHBOARD:127.0.0.1:8858}
+        port: ${SENTINEL_PORT:8719}
+      eager: true
+      # Gateway 限流规则（配合 Sentinel Dashboard 动态推送）
+      scg:
+        fallback:
+          mode: response
+          response-status: 429
+          response-body: '{"code":429,"msg":"请求过于频繁，请稍后重试"}'
+
+    # ── Spring Cloud Gateway 路由配置（lb:// 服务发现路由） ──
     gateway:
-      # 全局超时（毫秒）
       httpclient:
         connect-timeout: 5000
         response-timeout: 30s
       default-filters:
         - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+      discovery:
+        locator:
+          enabled: true         # 启用服务发现路由
+          lower-case-service-id: true
       routes:
-        # ── /api/auth/** → nexus-auth (8002)，白名单 ──
+        # ── Java 微服务（通过 Nacos lb:// 路由） ──────────────────
+
         - id: nexus-auth
-          uri: http://127.0.0.1:8002
+          uri: lb://nexus-auth
           predicates:
             - Path=/api/auth/**
           filters:
             - StripPrefix=0
 
-        # ── /api/tenant/** → nexus-tenant (8003) ──
         - id: nexus-tenant
-          uri: http://127.0.0.1:8003
+          uri: lb://nexus-tenant
           predicates:
             - Path=/api/tenant/**
           filters:
             - StripPrefix=0
 
-        # ── /api/session/** → nexus-session (8004) ──
         - id: nexus-session
-          uri: http://127.0.0.1:8004
+          uri: lb://nexus-session
           predicates:
             - Path=/api/session/**
           filters:
             - StripPrefix=0
 
-        # ── /api/platform/** → nexus-platform (8005) ──
         - id: nexus-platform
-          uri: http://127.0.0.1:8005
+          uri: lb://nexus-platform
           predicates:
             - Path=/api/platform/**
           filters:
             - StripPrefix=0
 
-        # ── /api/agent-config/** → nexus-agent-config (8006) ──
         - id: nexus-agent-config
-          uri: http://127.0.0.1:8006
+          uri: lb://nexus-agent-config
           predicates:
             - Path=/api/agent-config/**
           filters:
             - StripPrefix=0
 
-        # ── /api/knowledge/** → nexus-knowledge (8007) ──
         - id: nexus-knowledge
-          uri: http://127.0.0.1:8007
+          uri: lb://nexus-knowledge
           predicates:
             - Path=/api/knowledge/**
           filters:
             - StripPrefix=0
 
-        # ── /api/billing/** → nexus-billing (8008) ──
         - id: nexus-billing
-          uri: http://127.0.0.1:8008
+          uri: lb://nexus-billing
           predicates:
             - Path=/api/billing/**
           filters:
             - StripPrefix=0
 
-        # ── /api/agent/** → agent-engine (8001)，支持 SSE ──
+        # ── Python 微服务（非 Nacos，保持直连） ──────────────────
+        # Python 服务暂不注册 Nacos，使用 HTTP 直连
+        # 后续可通过 sidecar 模式接入 Nacos
+
         - id: nexus-agent-engine
-          uri: http://127.0.0.1:8001
+          uri: ${AGENT_ENGINE_URL:http://127.0.0.1:8001}
           predicates:
             - Path=/api/agent/**
           filters:
@@ -86,39 +107,35 @@ spring:
             response-timeout: 300000
             connect-timeout: 5000
 
-        # ── /api/llm/** → llm-proxy (8010) ──
         - id: nexus-llm-proxy
-          uri: http://127.0.0.1:8010
+          uri: ${LLM_PROXY_URL:http://127.0.0.1:8010}
           predicates:
             - Path=/api/llm/**
           filters:
             - StripPrefix=0
 
-        # ── /api/tools/** → tool-registry (8011) ──
         - id: nexus-tool-registry
-          uri: http://127.0.0.1:8011
+          uri: ${TOOL_REGISTRY_URL:http://127.0.0.1:8011}
           predicates:
             - Path=/api/tools/**
           filters:
             - StripPrefix=0
 
-        # ── /api/memory/** → memory-service (8012) ──
         - id: nexus-memory
-          uri: http://127.0.0.1:8012
+          uri: ${MEMORY_SERVICE_URL:http://127.0.0.1:8012}
           predicates:
             - Path=/api/memory/**
           filters:
             - StripPrefix=0
 
-        # ── /api/rag/** → rag-service (8013) ──
         - id: nexus-rag
-          uri: http://127.0.0.1:8013
+          uri: ${RAG_SERVICE_URL:http://127.0.0.1:8013}
           predicates:
             - Path=/api/rag/**
           filters:
             - StripPrefix=0
 
-# ── JWT 配置（与 nexus-auth 共享同一密钥） ──────────────────
+# ── JWT 配置 ──────────────────────────────────────────────────
 nexus:
   jwt:
     secret: ${NEXUS_JWT_SECRET:nexus-auth-jwt-secret-key-must-be-at-least-32-characters-long}
@@ -143,3 +160,4 @@ logging:
   level:
     tech.nexus.gateway: DEBUG
     org.springframework.cloud.gateway: INFO
+    com.alibaba.cloud.sentinel: DEBUG

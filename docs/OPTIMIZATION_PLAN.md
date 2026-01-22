@@ -105,3 +105,40 @@
 
 *文档版本：v1.1（执行完成）*
 *最后更新：2026-03-17*
+
+
+---
+
+## v3 追加优化（2026-03-17）
+
+在 v2 完成基础优化后，补充实现之前标记为"规划项"的 6 个优化。
+
+### 已完成
+
+| 序号 | 优化项 | 优先级 | 状态 |
+|------|--------|--------|------|
+| 11 | Nacos 服务注册发现 | P1 | 完成 |
+| 12 | Sentinel 限流熔断 | P1 | 完成 |
+| 13 | LLM Proxy 客户端连接池 | P3 | 完成 |
+| 14 | TokenStats Redis 持久化 | P3 | 完成 |
+| 15 | Memory Service ChromaDB 迁移 | P3 | 完成 |
+| 16 | parseChunkConfigInt Jackson | P3 | 完成 |
+
+### 涉及文件
+
+```
+(mod) nexus-gateway/pom.xml                 Nacos+Sentinel+LoadBalancer
+(mod) nexus-gateway/application.yml          lb:// + Sentinel
+(new) nexus-gateway/SentinelConfig.java      4分组12规则
+(new) nexus-common/SentinelFallbackHandler   通用降级
+(mod) nexus-auth~billing pom.xml x7          +Nacos+Sentinel
+(mod) nexus-auth~billing application.yml x7  +Nacos+Sentinel
+(mod) llm-proxy/router.py                   ClientPool
+(mod) llm-proxy/token_stats.py              Redis持久化
+(mod) llm-proxy/main.py                     shutdown hook
+(mod) memory-service/memory_service.py       ChromaDB
+(mod) knowledge/DocumentServiceImpl.java     Jackson
+(mod) docker-compose.yml                     +Nacos+Sentinel
+(mod) .env.example                           +Nacos+Sentinel
+(mod) docs/ARCHITECTURE.md                   v3内容
+```

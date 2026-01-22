@@ -309,22 +309,30 @@ public class DocumentServiceImpl implements DocumentService {
         return parseChunkConfigInt(kb.getChunkConfig(), "chunkOverlap", 50);
     }
 
+    /**
+     * 使用 Jackson ObjectMapper 解析 chunkConfig JSON 中的整型字段。
+     *
+     * <p>chunkConfig 格式示例：{@code {"chunkSize":500,"chunkOverlap":50}}
+     *
+     * @param chunkConfig JSON 字符串
+     * @param key         字段名
+     * @param defaultVal  默认值
+     * @return 解析结果，失败返回默认值
+     */
     private int parseChunkConfigInt(String chunkConfig, String key, int defaultVal) {
         if (chunkConfig == null || chunkConfig.isBlank()) {
             return defaultVal;
         }
         try {
-            // 简单解析 JSON 字段，避免引入 ObjectMapper 循环依赖
-            String pattern = "\"" + key + "\"";
-            int idx = chunkConfig.indexOf(pattern);
-            if (idx < 0) return defaultVal;
-            int colonIdx = chunkConfig.indexOf(':', idx);
-            int commaIdx = chunkConfig.indexOf(',', colonIdx);
-            int braceIdx = chunkConfig.indexOf('}', colonIdx);
-            int endIdx = (commaIdx > 0 && commaIdx < braceIdx) ? commaIdx : braceIdx;
-            String val = chunkConfig.substring(colonIdx + 1, endIdx).trim();
-            return Integer.parseInt(val);
+            com.fasterxml.jackson.databind.JsonNode root =
+                    new com.fasterxml.jackson.databind.ObjectMapper().readTree(chunkConfig);
+            com.fasterxml.jackson.databind.JsonNode node = root.get(key);
+            if (node != null && node.isNumber()) {
+                return node.asInt(defaultVal);
+            }
+            return defaultVal;
         } catch (Exception e) {
+            log.warn("解析 chunkConfig 失败: key={}, config={}, error={}", key, chunkConfig, e.getMessage());
             return defaultVal;
         }
     }

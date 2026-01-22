@@ -63,6 +63,10 @@ class Settings(BaseSettings):
 
     # ── 服务配置 ──
     llm_proxy_port: int = 8010
+    # Redis（Token 统计持久化）
+    redis_host: str = "127.0.0.1"
+    redis_port: int = 6379
+
     log_level: str = "INFO"
 
     # ── 解析后的 providers 字典（内部使用，不来自环境变量） ──

@@ -25,7 +25,7 @@ router = APIRouter()
 )
 async def get_stats() -> StatsResponse:
     """返回按 model 聚合的 Token 用量统计。"""
-    snap = token_stats.snapshot()
+    snap = await token_stats.snapshot()
     by_model = {
         model: ModelStats(**data)
         for model, data in snap["by_model"].items()

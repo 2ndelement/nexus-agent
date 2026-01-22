@@ -1,6 +1,20 @@
 spring:
   application:
     name: nexus-tenant
+  # Nacos 服务注册
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        namespace: ${NACOS_NAMESPACE:}
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+    # Sentinel 限流
+    sentinel:
+      transport:
+        dashboard: ${SENTINEL_DASHBOARD:127.0.0.1:8080}
+        port: ${SENTINEL_PORT:8719}
+      eager: true
+
   datasource:
     url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/nexus_agent}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: ${MYSQL_USERNAME:nexus}

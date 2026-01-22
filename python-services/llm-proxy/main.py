@@ -47,6 +47,14 @@ app.include_router(completions_router, prefix="/v1", tags=["completions"])
 app.include_router(stats_router, prefix="/v1", tags=["stats"])
 
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    """优雅停机：关闭连接池。"""
+    from app.core.router import get_client_pool
+    await get_client_pool().close_all()
+    logger.info("LLM Proxy 已关闭")
+
+
 @app.get("/health", response_model=HealthResponse, tags=["meta"])
 async def health() -> HealthResponse:
     """健康检查接口，供 K8s/Docker 探针使用。"""

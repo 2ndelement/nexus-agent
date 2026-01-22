@@ -137,3 +137,17 @@
 (mod) nexus-agent-config/.../application.yml            — 环境变量化
 (mod) docs/ARCHITECTURE.md                              — 全面更新
 ```
+
+
+---
+
+## v3 优化（2026-03-17）
+
+| # | 优化项 | 涉及模块 |
+|---|--------|----------|
+| 11 | Nacos 服务注册发现 | 8个Java服务 pom+yml |
+| 12 | Sentinel 限流熔断 | Gateway SentinelConfig + common FallbackHandler |
+| 13 | LLM Proxy 客户端连接池 | llm-proxy/router.py ClientPool |
+| 14 | TokenStats Redis 持久化 | llm-proxy/token_stats.py |
+| 15 | Memory Service ChromaDB | memory-service/memory_service.py |
+| 16 | parseChunkConfigInt | knowledge/DocumentServiceImpl.java |

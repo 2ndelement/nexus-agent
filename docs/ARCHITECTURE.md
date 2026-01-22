@@ -413,6 +413,47 @@ docker compose ps
 
 ---
 
+## 5.4 服务注册与发现 (Nacos)
+
+**v3 优化新增：** 所有 Java 微服务注册到 Nacos，实现动态服务发现。
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    Nacos Server                      │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌──────────┐ │
+│  │nexus-auth│ │nexus-   │ │nexus-   │ │nexus-    │ │
+│  │  :8002  │ │tenant   │ │session  │ │knowledge │ │
+│  │         │ │  :8003  │ │  :8004  │ │  :8007   │ │
+│  └─────────┘ └─────────┘ └─────────┘ └──────────┘ │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌──────────┐ │
+│  │nexus-   │ │nexus-   │ │nexus-   │ │nexus-    │ │
+│  │platform │ │agent-   │ │billing  │ │gateway   │ │
+│  │  :8005  │ │config   │ │  :8008  │ │  :8080   │ │
+│  └─────────┘ │  :8006  │ └─────────┘ └──────────┘ │
+│              └─────────┘                            │
+└─────────────────────────────────────────────────────┘
+```
+
+- Gateway 使用 `lb://nexus-auth` 等 URI 进行动态路由
+- Python 服务暂不注册 Nacos，保持 HTTP 直连（后续可通过 sidecar 接入）
+
+## 5.5 限流与熔断 (Sentinel)
+
+**v3 优化新增：** Gateway 层 Sentinel 限流 + 业务服务 `@SentinelResource` 注解。
+
+| API 分组 | QPS 阈值 | Burst | 说明 |
+|----------|---------|-------|------|
+| agent_api | 50 | 10 | LLM 调用成本高 |
+| auth_api | 20 | 5 | 防暴力破解 |
+| knowledge_api | 10 | 3 | 文件处理资源密集 |
+| llm_api | 30 | 10 | LLM 代理 |
+| 通用路由 | 100 | 20 | tenant/session/billing 等 |
+
+- 限流返回 `429 {"code":429,"msg":"请求过于频繁，请稍后重试"}`
+- 可通过 Sentinel Dashboard (`:8858`) 动态调整规则
+
+---
+
 ## 6. 安全性设计
 
 ### 6.1 认证流程
@@ -464,7 +505,7 @@ docker compose ps
 | HTTPS only | 生产环境强制 HTTPS |
 | JWT 签名 | HS256/RSA256 |
 | Token 过期 | Access Token 2h 强制刷新 |
-| 限流 | Redis 计数限流（Billing 服务已实现），Sentinel 为规划项 |
+| 限流 | Sentinel 网关限流（4 个 API 分组 + 12 条规则） + Redis 配额计费 |
 | 日志审计 | 记录所有敏感操作 |
 
 ---
@@ -726,3 +767,15 @@ nexus:
 7. ✅ Docker Compose 全量编排（19 服务）
 8. ✅ 补充测试（embed-worker / sandbox / gateway 黑名单 / tool calling）
 9. ✅ 架构文档同步更新
+
+### v3 优化（2026-03-17）
+
+**Nacos + Sentinel 基础设施：**
+1. ✅ Nacos 服务注册发现 — 8 个 Java 服务全部注册，Gateway lb:// 动态路由
+2. ✅ Sentinel 限流熔断 — SentinelConfig 4 分组 12 规则 + 通用降级处理器
+
+**代码质量提升：**
+3. ✅ LLM Proxy 客户端连接池复用（ClientPool）
+4. ✅ TokenStats Redis 持久化（重启不丢失 + 内存降级）
+5. ✅ Memory Service 向量存储迁移 ChromaDB（替代 MySQL TEXT 字段）
+6. ✅ Knowledge parseChunkConfigInt 改用 Jackson ObjectMapper

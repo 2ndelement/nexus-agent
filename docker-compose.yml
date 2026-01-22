@@ -21,10 +21,14 @@ x-java-common: &java-common
     RABBITMQ_PORT: 5672
     RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
     RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+    NACOS_ADDR: nacos:8848
+    SENTINEL_DASHBOARD: sentinel-dashboard:8858
   depends_on:
     mysql:
       condition: service_healthy
     redis:
+      condition: service_healthy
+    nacos:
       condition: service_healthy
   restart: unless-stopped
   networks:
@@ -48,6 +52,8 @@ x-python-common: &python-common
     mysql:
       condition: service_healthy
     redis:
+      condition: service_healthy
+    nacos:
       condition: service_healthy
   restart: unless-stopped
   networks:
@@ -118,6 +124,36 @@ services:
       - "8000:8000"
     volumes:
       - chroma-data:/chroma/chroma
+    networks:
+      - nexus
+
+  nacos:
+    image: nacos/nacos-server:v2.4.3
+    container_name: nexus-nacos
+    environment:
+      MODE: standalone
+      SPRING_DATASOURCE_PLATFORM: ""
+      NACOS_AUTH_ENABLE: "false"
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+    volumes:
+      - nacos-data:/home/nacos/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8848/nacos/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - nexus
+
+  sentinel-dashboard:
+    image: bladex/sentinel-dashboard:1.8.8
+    container_name: nexus-sentinel
+    ports:
+      - "8858:8858"
+    environment:
+      JAVA_OPTS: "-Dserver.port=8858 -Dcsp.sentinel.dashboard.server=localhost:8858"
     networks:
       - nexus
 
@@ -318,6 +354,7 @@ volumes:
   rabbitmq-data:
   chroma-data:
   upload-data:
+  nacos-data:
 
 networks:
   nexus:
