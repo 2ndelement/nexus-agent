@@ -1,36 +1,42 @@
 """
-app/config.py — RAG Service 配置
-所有配置项来自环境变量，无硬编码密钥。
+app/config.py — 配置
 """
-from __future__ import annotations
-
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env.dev",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore",
-    )
+    """所有配置项均从环境变量或 .env 读取"""
 
-    # Service
-    rag_service_port: int = 8013
-    log_level: str = "INFO"
+    # 服务
+    host: str = "0.0.0.0"
+    port: int = 8013
 
     # ChromaDB
-    chroma_mode: str = "memory"          # "memory" | "persistent"
-    chroma_persist_dir: str = "./chroma_data"
+    chroma_persist_directory: str = "./data/chroma"
 
     # Embedding
-    embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
-    embedding_dim: int = 384             # 与上述模型匹配
+    # 可选模型：
+    # - BAAI/bge-large-zh-v1.5 (1024维，效果最好)
+    # - BAAI/bge-base-zh-v1.5  (768维，平衡)  
+    # - BAAI/bge-small-zh-v1.5  (512维，最快)
+    embedding_model: str = "BAAI/bge-base-zh-v1.5"
 
-    # Retrieval defaults
-    default_top_k: int = 5
-    rrf_k: int = 60                      # RRF 常数，一般取 60
-    bm25_top_k_factor: int = 3           # BM25 候选集 = top_k * factor
+    # Reranker (可选)
+    # - BAAI/bge-reranker-base
+    # - BAAI/bge-reranker-large
+    reranker_model: str = "BAAI/bge-reranker-base"
+    reranker_top_k: int = 5  # 重排后取前5条
+
+    # 分块
+    chunk_size: int = 1000
+    chunk_overlap: int = 150
+
+    # 日志
+    log_level: str = "INFO"
+
+    class Config:
+        env_file = ".env"
+        case_sensitive = False
 
 
 settings = Settings()

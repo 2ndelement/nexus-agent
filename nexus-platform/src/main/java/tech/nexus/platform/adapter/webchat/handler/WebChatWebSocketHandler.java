@@ -8,36 +8,20 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.socket.*;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 import tech.nexus.platform.common.model.PlatformMessage;
-import tech.nexus.platform.common.mq.PlatformMessagePublisher;
+import tech.nexus.platform.service.AgentService;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * WebChat WebSocket 消息处理器
- * <p>
- * 协议规范（客户端 → 服务端）：
- * <pre>
- * {
- *   "type": "message",      // message | ping | identify
- *   "content": "用户消息",
- *   "sessionId": "xxx",     // 可选，会话标识
- *   "tenantId": "xxx"       // 租户ID（由前端从 JWT 中解析后传入）
- * }
- * </pre>
- * <p>
- * 协议规范（服务端 → 客户端）：
- * <pre>
- * {
- *   "type": "message" | "reply" | "error" | "pong" | "connected",
- *   "messageId": "xxx",
- *   "content": "...",
- *   "timestamp": "..."
- * }
- * </pre>
+ * 支持心跳检测和断线重连
  */
 @Slf4j
 @Component
@@ -45,12 +29,28 @@ import java.util.concurrent.ConcurrentHashMap;
 public class WebChatWebSocketHandler extends TextWebSocketHandler {
 
     private final ObjectMapper objectMapper;
-    private final PlatformMessagePublisher messagePublisher;
+    private final AgentService agentService;
 
     /**
-     * 活跃连接会话 Map: sessionId → WebSocketSession
+     * 活动连接会话 Map: sessionId → WebSocketSession
      */
     private final Map<String, WebSocketSession> activeSessions = new ConcurrentHashMap<>();
+
+    /**
+     * 会话元数据 Map: sessionId → metadata
+     */
+    private final Map<String, SessionMetadata> sessionMetadata = new ConcurrentHashMap<>();
+
+    /**
+     * 心跳调度器
+     */
+    private final ScheduledExecutorService heartbeatScheduler = Executors.newScheduledThreadPool(
+            2, r -> {
+                Thread t = new Thread(r, "ws-heartbeat");
+                t.setDaemon(true);
+                return t;
+            }
+    );
 
     /**
      * 连接建立
@@ -59,8 +59,18 @@ public class WebChatWebSocketHandler extends TextWebSocketHandler {
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         String sessionId = session.getId();
         activeSessions.put(sessionId, session);
+        
+        // 记录会话元数据
+        sessionMetadata.put(sessionId, new SessionMetadata(
+                LocalDateTime.now(),
+                session.getRemoteAddress() != null ? session.getRemoteAddress().getAddress().getHostAddress() : "unknown"
+        ));
+
         log.info("[WebChat] 新连接建立: sessionId={}, remoteAddr={}",
                 sessionId, session.getRemoteAddress());
+
+        // 启动心跳任务
+        startHeartbeat(session);
 
         // 向客户端发送连接成功消息
         sendJson(session, Map.of(
@@ -71,12 +81,47 @@ public class WebChatWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
+     * 启动心跳 - 定期发送 ping
+     */
+    private void startHeartbeat(WebSocketSession session) {
+        String sessionId = session.getId();
+        
+        heartbeatScheduler.scheduleAtFixedRate(() -> {
+            try {
+                if (session.isOpen()) {
+                    // 发送 ping
+                    sendJson(session, Map.of(
+                            "type", "ping",
+                            "timestamp", LocalDateTime.now().toString()
+                    ));
+                    log.debug("[WebChat] 发送心跳: sessionId={}", sessionId);
+                } else {
+                    // 连接已关闭，停止心跳
+                    log.info("[WebChat] 连接已关闭，停止心跳: sessionId={}", sessionId);
+                    activeSessions.remove(sessionId);
+                    sessionMetadata.remove(sessionId);
+                }
+            } catch (Exception e) {
+                log.error("[WebChat] 心跳发送失败: sessionId={}, error={}", sessionId, e.getMessage());
+            }
+        }, 30, 30, TimeUnit.SECONDS); // 30秒心跳间隔
+    }
+
+    /**
      * 接收文本消息
      */
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage textMessage) throws Exception {
         String payload = textMessage.getPayload();
-        log.debug("[WebChat] 收到消息: sessionId={}, payload={}", session.getId(), payload);
+        String sessionId = session.getId();
+        
+        log.debug("[WebChat] 收到消息: sessionId={}, payload={}", sessionId, payload);
+
+        // 更新最后活跃时间
+        SessionMetadata metadata = sessionMetadata.get(sessionId);
+        if (metadata != null) {
+            metadata.setLastActiveTime(LocalDateTime.now());
+        }
 
         try {
             JsonNode node = objectMapper.readTree(payload);
@@ -84,6 +129,7 @@ public class WebChatWebSocketHandler extends TextWebSocketHandler {
 
             switch (type) {
                 case "ping" -> handlePing(session);
+                case "pong" -> handlePong(session);  // 处理客户端pong
                 case "identify" -> handleIdentify(session, node);
                 case "message" -> handleChatMessage(session, node);
                 default -> {
@@ -105,16 +151,25 @@ public class WebChatWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
-     * 处理身份认证消息（客户端传入 tenantId/userId）
+     * 处理客户端 pong 响应
+     */
+    private void handlePong(WebSocketSession session) {
+        log.debug("[WebChat] 收到客户端 pong: sessionId={}", session.getId());
+    }
+
+    /**
+     * 处理身份认证消息
      */
     private void handleIdentify(WebSocketSession session, JsonNode node) throws IOException {
         String tenantId = node.path("tenantId").asText(null);
         String userId = node.path("userId").asText(null);
-        // 将元数据存入 session attributes
+        
         session.getAttributes().put("tenantId", tenantId);
         session.getAttributes().put("userId", userId);
+        
         log.info("[WebChat] 用户身份确认: sessionId={}, tenantId={}, userId={}",
                 session.getId(), tenantId, userId);
+        
         sendJson(session, Map.of("type", "identified", "status", "ok"));
     }
 
@@ -149,16 +204,16 @@ public class WebChatWebSocketHandler extends TextWebSocketHandler {
                 .receivedAt(LocalDateTime.now())
                 .build();
 
-        // 发布到消息队列
-        messagePublisher.publishInboundMessage(message);
-
-        // 回复确认
+        // 返回确认
         sendJson(session, Map.of(
                 "type", "ack",
                 "messageId", messageId,
-                "status", "queued",
+                "status", "processing",
                 "timestamp", LocalDateTime.now().toString()
         ));
+
+        // 调用 AgentService 流式推送
+        agentService.streamChatToWebSocket(message, session);
     }
 
     /**
@@ -166,8 +221,10 @@ public class WebChatWebSocketHandler extends TextWebSocketHandler {
      */
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-        activeSessions.remove(session.getId());
-        log.info("[WebChat] 连接关闭: sessionId={}, status={}", session.getId(), status);
+        String sessionId = session.getId();
+        activeSessions.remove(sessionId);
+        sessionMetadata.remove(sessionId);
+        log.info("[WebChat] 连接关闭: sessionId={}, status={}", sessionId, status);
     }
 
     /**
@@ -177,10 +234,11 @@ public class WebChatWebSocketHandler extends TextWebSocketHandler {
     public void handleTransportError(WebSocketSession session, Throwable exception) {
         log.error("[WebChat] 传输错误: sessionId={}, error={}", session.getId(), exception.getMessage());
         activeSessions.remove(session.getId());
+        sessionMetadata.remove(session.getId());
     }
 
     /**
-     * 向指定会话发送消息（供 OutboundMessageConsumer 调用）
+     * 向指定会话发送消息
      */
     public void sendToSession(String sessionId, String content) {
         WebSocketSession session = activeSessions.get(sessionId);
@@ -217,5 +275,30 @@ public class WebChatWebSocketHandler extends TextWebSocketHandler {
 
     private void sendError(WebSocketSession session, String errorMsg) throws IOException {
         sendJson(session, Map.of("type", "error", "message", errorMsg));
+    }
+
+    /**
+     * 会话元数据
+     */
+    private static class SessionMetadata {
+        private LocalDateTime lastActiveTime;
+        private String remoteAddress;
+
+        public SessionMetadata(LocalDateTime lastActiveTime, String remoteAddress) {
+            this.lastActiveTime = lastActiveTime;
+            this.remoteAddress = remoteAddress;
+        }
+
+        public LocalDateTime getLastActiveTime() {
+            return lastActiveTime;
+        }
+
+        public void setLastActiveTime(LocalDateTime lastActiveTime) {
+            this.lastActiveTime = lastActiveTime;
+        }
+
+        public String getRemoteAddress() {
+            return remoteAddress;
+        }
     }
 }

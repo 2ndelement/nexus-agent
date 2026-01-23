@@ -15,6 +15,10 @@ import logging
 
 import uvicorn
 
+import os
+import socket
+from common.nacos import create_registry
+
 
 async def async_main():
     from app.consumer import main as consumer_main

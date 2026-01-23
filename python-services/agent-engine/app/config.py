@@ -1,11 +1,11 @@
 """
-app/config.py — 从环境变量读取配置（无硬编码密钥）
+app/config.py — 从环境变量读取配置（无硬编码密码）
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """所有配置项来自环境变量或 .env 文件，严禁硬编码密钥。"""
+    """所有配置项皆来自环境变量或 .env 文件，严禁硬编码密码。"""
 
     model_config = SettingsConfigDict(
         env_file=".env.dev",
@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.openai.com/v1"
     llm_model: str = "gpt-4o"
     llm_temperature: float = 0.7
-    llm_timeout: float = 60.0  # 秒，asyncio 操作超时保护
+    llm_timeout: float = 60.0
 
     # MySQL
     mysql_host: str = "127.0.0.1"
@@ -30,13 +30,13 @@ class Settings(BaseSettings):
 
     @property
     def mysql_url(self) -> str:
-        """返回 aiomysql 兼容的连接串 (mysql+aiomysql://...)"""
+        """返回 aiomysql 兼容的连接串"""
         return (
             f"mysql+aiomysql://{self.mysql_user}:{self.mysql_pass}"
             f"@{self.mysql_host}:{self.mysql_port}/{self.mysql_db}"
         )
 
-    # Redis（暂备用）
+    # Redis（备用）
     redis_host: str = "127.0.0.1"
     redis_port: int = 6379
 
@@ -49,7 +49,17 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # Tool Calling
-    max_tool_iterations: int = 5     # 单轮最大工具调用轮次
+    max_tool_iterations: int = 5
+
+    # 服务发现
+    service_name: str = "nexus-agent-engine"
+    service_ip: str = ""
+    nacos_enabled: bool = True
+    nacos_server_addresses: str = "127.0.0.1:8848"
+    nacos_namespace: str = ""
+    nacos_group: str = "DEFAULT_GROUP"
+    nacos_username: str = "nacos"
+    nacos_password: str = "nacos"
 
 
 # 单例

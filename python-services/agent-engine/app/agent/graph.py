@@ -9,7 +9,7 @@ app/agent/graph.py — LangGraph 图定义
 
 设计原则：
 - 禁止全局共享 compiled Graph 实例
-- 每次 invoke/stream 使用独立的 config（含 thread_id）
+- 每次 invoke/stream 使用独立的 config（包含 thread_id）
 - thread_id 格式严格为 f"{tenant_id}:{conversation_id}"
 """
 from __future__ import annotations
@@ -25,17 +25,17 @@ from app.agent.state import AgentState
 
 logger = logging.getLogger(__name__)
 
-# ─────────────────────────── 图构建 ───────────────────────────
+# ═══════════════════════════════════════════════════════════════════ 图构建设 ═══════════════════════════════════════════════════════════════════
 
 
 def build_graph(checkpointer=None) -> Any:
     """
-    构建并编译 LangGraph 图。
+    编译并翻译 LangGraph 图。
 
     图结构:
         START → call_llm → [should_continue] 
-                                ├── "tool_call" → tool_call_node → call_llm (循环)
-                                └── "end" → END
+                                ├─ "tool_call" → tool_call_node → call_llm (循环)
+                                └─ "end" → END
 
     Args:
         checkpointer: 可选的 checkpointer 实例（AIOMySQLSaver 或测试 Mock）。
@@ -134,3 +134,54 @@ async def astream_agent(
             chunk = event.get("data", {}).get("chunk")
             if chunk and hasattr(chunk, "content") and chunk.content:
                 yield chunk.content
+
+
+async def invoke_agent(
+    graph: Any,
+    tenant_id: str,
+    user_id: str,
+    conversation_id: str,
+    message: str,
+) -> str:
+    """
+    以非流式方式运行 Agent，等待完整回复后返回。
+
+    用于 QQ 机器人等不需要流式输出的场景。
+
+    Args:
+        graph: 已编译的 LangGraph CompiledGraph。
+        tenant_id: 租户 ID。
+        user_id: 用户 ID。
+        conversation_id: 会话 ID。
+        message: 用户输入消息。
+
+    Returns:
+        str: AI 完整回复内容。
+    """
+    config = make_config(tenant_id, conversation_id)
+
+    input_state: dict = {
+        "messages": [HumanMessage(content=message)],
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "conversation_id": conversation_id,
+    }
+
+    logger.info(
+        "invoke_agent start: thread_id=%s:%s, user=%s",
+        tenant_id,
+        conversation_id,
+        user_id,
+    )
+
+    # 使用 ainvoke 等待完整结果
+    result = await graph.ainvoke(input_state, config)
+
+    # 从结果中提取最终 AI 回复
+    messages = result.get("messages", [])
+    if messages:
+        last_message = messages[-1]
+        # 返回最终消息的 content
+        return last_message.content if hasattr(last_message, "content") else str(last_message)
+    
+    return ""

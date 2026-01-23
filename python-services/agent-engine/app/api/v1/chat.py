@@ -13,6 +13,9 @@ SSE 事件格式：
     data: {"type": "chunk", "content": "..."}
     data: {"type": "done", "conversation_id": "..."}
     data: {"type": "error", "message": "..."}
+
+POST /api/v1/agent/chat (非流式)
+    用于 QQ 机器人等不需要流式输出的场景
 """
 from __future__ import annotations
 
@@ -23,9 +26,9 @@ from typing import AsyncIterator
 from fastapi import APIRouter, Header, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
-from app.agent.graph import astream_agent, build_graph
+from app.agent.graph import astream_agent, build_graph, invoke_agent
 from app.checkpointer import get_mysql_checkpointer
-from app.schemas import ChatRequest, SSEChunk, SSEDone, SSEError
+from app.schemas import ChatRequest, ChatRequestNonStream, ChatResponse, SSEChunk, SSEDone, SSEError
 
 logger = logging.getLogger(__name__)
 
@@ -101,3 +104,52 @@ async def chat_stream(
         ),
         media_type="text/event-stream",
     )
+
+
+@router.post("/chat", response_model=ChatResponse)
+async def chat_non_stream(
+    request: Request,
+    body: ChatRequestNonStream,
+    x_tenant_id: str = Header(..., alias="X-Tenant-Id"),
+    x_user_id: str = Header(..., alias="X-User-Id"),
+    x_conv_id: str = Header(..., alias="X-Conv-Id"),
+):
+    """
+    非流式对话接口（用于 QQ 机器人等场景）。
+
+    支持从 Header 或 Body 获取租户/用户/会话信息，
+    Body 中的值优先级高于 Header。
+    """
+    # 使用 Body 中的值覆盖 Header（如果提供）
+    tenant_id = body.tenant_id or x_tenant_id
+    user_id = body.user_id or x_user_id
+    conversation_id = body.conversation_id or x_conv_id
+
+    logger.info(
+        "chat_non_stream: tenant=%s, user=%s, conv=%s",
+        tenant_id,
+        user_id,
+        conversation_id,
+    )
+
+    try:
+        async with get_mysql_checkpointer() as checkpointer:
+            graph = build_graph(checkpointer=checkpointer)
+            result = await invoke_agent(
+                graph=graph,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                message=body.message,
+            )
+
+        return ChatResponse(
+            conversation_id=conversation_id,
+            content=result,
+        )
+
+    except Exception as exc:
+        logger.exception(
+            "Agent 执行异常: tenant=%s, conv=%s", tenant_id, conversation_id
+        )
+        raise HTTPException(status_code=500, detail=str(exc))

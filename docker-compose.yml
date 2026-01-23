@@ -48,6 +48,10 @@ x-python-common: &python-common
     OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
     LLM_MODEL: ${LLM_MODEL:-gpt-4o}
+    NACOS_ENABLED: "true"
+    NACOS_SERVER: nacos:8848
+    NACOS_NAMESPACE: ${NACOS_NAMESPACE:-}
+    NACOS_GROUP: DEFAULT_GROUP
   depends_on:
     mysql:
       condition: service_healthy
@@ -267,6 +271,8 @@ services:
 
   agent-engine:
     <<: *python-common
+    environment:
+      NACOS_SERVICE_NAME: nexus-agent-engine
     container_name: nexus-agent-engine
     build:
       context: ./python-services/agent-engine
@@ -282,6 +288,8 @@ services:
 
   llm-proxy:
     <<: *python-common
+    environment:
+      NACOS_SERVICE_NAME: nexus-llm-proxy
     container_name: nexus-llm-proxy
     build:
       context: ./python-services/llm-proxy
@@ -291,6 +299,8 @@ services:
 
   tool-registry:
     <<: *python-common
+    environment:
+      NACOS_SERVICE_NAME: nexus-tool-registry
     container_name: nexus-tool-registry
     build:
       context: ./python-services/tool-registry
@@ -300,6 +310,8 @@ services:
 
   memory-service:
     <<: *python-common
+    environment:
+      NACOS_SERVICE_NAME: nexus-memory-service
     container_name: nexus-memory-service
     build:
       context: ./python-services/memory-service
@@ -309,6 +321,8 @@ services:
 
   rag-service:
     <<: *python-common
+    environment:
+      NACOS_SERVICE_NAME: nexus-rag-service
     container_name: nexus-rag-service
     build:
       context: ./python-services/rag-service
@@ -338,6 +352,8 @@ services:
 
   sandbox-service:
     <<: *python-common
+    environment:
+      NACOS_SERVICE_NAME: nexus-sandbox-service
     container_name: nexus-sandbox
     build:
       context: ./python-services/sandbox-service

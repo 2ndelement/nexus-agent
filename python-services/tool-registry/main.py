@@ -78,4 +78,36 @@ def health() -> dict:
 
 if __name__ == "__main__":
     import uvicorn
+
+# ═══════════════════════════════════════════════════════════════════ Nacos 服务注册 ═══════════════════════════════════════════════════════════════════
+
+def get_local_ip():
+    """获取本机 IP"""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+def start_nacos_registry():
+    """启动 Nacos 服务注册"""
+    nacos_enabled = os.getenv("NACOS_ENABLED", "false").lower() == "true"
+    if not nacos_enabled:
+        print("[Nacos] 未启用 Nacos 服务注册")
+        return
+    
+    service_name = os.getenv("NACOS_SERVICE_NAME", "nexus-tool-registry")
+    port = int(os.getenv("PORT", "8000"))
+    ip = os.getenv("SERVICE_IP", get_local_ip())
+    
+    registry = create_registry(service_name, ip, port)
+    registry.start()
+    print(f"[Nacos] 服务注册完成: {service_name} -> {ip}:{port}")
+
+# 启动时注册
+start_nacos_registry()
+
     uvicorn.run("main:app", host="0.0.0.0", port=8011, reload=False)
