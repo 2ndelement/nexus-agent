@@ -3,7 +3,7 @@ app/api/v1/chat.py — SSE 流式对话接口
 
 POST /api/v1/agent/chat/stream
 Request Headers:
-    X-Tenant-Id: <tenant_id>   (必须，来自 Java Gateway 注入，不允许用户自填)
+    X-Tenant-Id: <tenant_id>   (必须，来自 Java Gateway 注入)
     X-User-Id: <user_id>       (必须)
     X-Conv-Id: <conv_id>       (必须)
 Request Body: { "message": "..." }
@@ -13,9 +13,10 @@ SSE 事件格式：
     data: {"type": "chunk", "content": "..."}
     data: {"type": "done", "conversation_id": "..."}
     data: {"type": "error", "message": "..."}
+    data: {"type": "stopped", "conversation_id": "..."}
 
 POST /api/v1/agent/chat (非流式)
-    用于 QQ 机器人等不需要流式输出的场景
+    用于 QQ 机器人等场景
 """
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
 from app.agent.graph import astream_agent, build_graph, invoke_agent
+from app.control.session_manager import get_session_manager, ConversationStatus
 from app.checkpointer import get_mysql_checkpointer
 from app.schemas import ChatRequest, ChatRequestNonStream, ChatResponse, SSEChunk, SSEDone, SSEError
 
@@ -47,13 +49,22 @@ async def _chat_event_generator(
     message: str,
 ) -> AsyncIterator[dict]:
     """
-    SSE 事件生成器。
-
-    异常时发送 error 事件而非直接断连（符合 Code Review 检查清单）。
+    SSE 事件生成器
     """
+    from app.control.session_manager import get_session_manager
+    from app.control.interrupt_controller import get_interrupt_controller
+    
+    session_mgr = await get_session_manager()
+    interrupt_ctrl = await get_interrupt_controller()
+    
+    # 设置状态为运行中
+    await session_mgr.set_running(conversation_id)
+    
     try:
         async with get_mysql_checkpointer() as checkpointer:
             graph = build_graph(checkpointer=checkpointer)
+            
+            # 流式生成
             async for token in astream_agent(
                 graph=graph,
                 tenant_id=tenant_id,
@@ -61,16 +72,34 @@ async def _chat_event_generator(
                 conversation_id=conversation_id,
                 message=message,
             ):
+                # 检查是否被中断
+                if await interrupt_ctrl.check_interrupted(conversation_id):
+                    signal = await interrupt_ctrl.wait_for_signal(conversation_id, timeout=0.1)
+                    if signal:
+                        if signal.action == "stop":
+                            logger.info(f"[Chat] 对话被停止: {conversation_id}")
+                            yield {"data": json.dumps({
+                                "type": "stopped",
+                                "conversation_id": conversation_id
+                            })}
+                            await session_mgr.set_stopped(conversation_id)
+                            return
+                
                 yield {"data": _sse_data(SSEChunk(content=token))}
 
         # 流式结束事件
         yield {"data": _sse_data(SSEDone(conversation_id=conversation_id))}
+        await session_mgr.set_completed(conversation_id)
 
+    except InterruptedError as exc:
+        logger.info(f"[Chat] Agent 被中断: {conversation_id} - {exc}")
+        yield {"data": _sse_data(SSEError(message="Agent interrupted"))}
+        await session_mgr.set_paused(conversation_id)
+        
     except Exception as exc:
-        logger.exception(
-            "Agent 执行异常: tenant=%s, conv=%s", tenant_id, conversation_id
-        )
+        logger.exception(f"[Chat] Agent 执行异常: tenant={tenant_id}, conv={conversation_id}")
         yield {"data": _sse_data(SSEError(message=str(exc)))}
+        await session_mgr.set_stopped(conversation_id)
 
 
 @router.post("/chat/stream")
@@ -82,12 +111,8 @@ async def chat_stream(
     x_conv_id: str = Header(..., alias="X-Conv-Id"),
 ):
     """
-    SSE 流式对话接口。
-
-    所有租户信息必须从 Header 获取（由 Java Gateway 注入），
-    严禁从请求体或查询参数获取 tenant_id。
+    SSE 流式对话接口
     """
-    # message 已由 Pydantic min_length=1 校验，此处无需二次检查
     logger.info(
         "chat_stream: tenant=%s, user=%s, conv=%s",
         x_tenant_id,
@@ -115,12 +140,8 @@ async def chat_non_stream(
     x_conv_id: str = Header(..., alias="X-Conv-Id"),
 ):
     """
-    非流式对话接口（用于 QQ 机器人等场景）。
-
-    支持从 Header 或 Body 获取租户/用户/会话信息，
-    Body 中的值优先级高于 Header。
+    非流式对话接口（用于 QQ 机器人等场景）
     """
-    # 使用 Body 中的值覆盖 Header（如果提供）
     tenant_id = body.tenant_id or x_tenant_id
     user_id = body.user_id or x_user_id
     conversation_id = body.conversation_id or x_conv_id
@@ -149,7 +170,5 @@ async def chat_non_stream(
         )
 
     except Exception as exc:
-        logger.exception(
-            "Agent 执行异常: tenant=%s, conv=%s", tenant_id, conversation_id
-        )
+        logger.exception(f"[Chat] Agent 执行异常: tenant={tenant_id}, conv={conversation_id}")
         raise HTTPException(status_code=500, detail=str(exc))

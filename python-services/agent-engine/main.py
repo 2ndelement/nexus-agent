@@ -3,6 +3,7 @@ main.py — FastAPI 应用入口
 
 服务端口：8001
 支持 Nacos 服务注册
+支持 Agent 中断控制
 """
 from __future__ import annotations
 
@@ -15,6 +16,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.chat import router as chat_router
+from app.api.v1.control import router as control_router
+from app.api.v1.websocket_control import router as websocket_router
 from app.schemas import HealthResponse
 from common.nacos import create_registry, NacosServiceRegistry
 
@@ -29,10 +32,10 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="NexusAgent — Agent Engine",
     version="0.1.0",
-    description="Python 核心 AI 服务：LangGraph Agent + MySQL Checkpoint + SSE 流式输出",
+    description="Python 核心 AI 服务：LangGraph Agent + 中断控制 + SSE 流式输出",
 )
 
-# CORS（开发环境宽松，生产由 Gateway 控制）
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -42,17 +45,18 @@ app.add_middleware(
 
 # ═══════════════════════════════════════════════════════════════════ 路由 ═══════════════════════════════════════════════════════════════════
 app.include_router(chat_router, prefix="/api/v1/agent")
+app.include_router(control_router, prefix="/api/v1/agent/control")
+app.include_router(websocket_router, prefix="/api/v1/agent")
 
 
 @app.get("/health", response_model=HealthResponse, tags=["meta"])
 async def health() -> HealthResponse:
-    """健康检查接口，供 K8s/Docker 探测使用。"""
+    """健康检查"""
     return HealthResponse()
 
 
 # ═══════════════════════════════════════════════════════════════════ Nacos 服务注册 ═══════════════════════════════════════════════════════════════════
 
-# 获取本机 IP
 def get_local_ip() -> str:
     """获取本机 IP"""
     try:
@@ -65,7 +69,6 @@ def get_local_ip() -> str:
         return "127.0.0.1"
 
 
-# Nacos 注册
 _nacos_registry: NacosServiceRegistry = None
 
 
