@@ -20,7 +20,17 @@ from typing import Any, AsyncIterator
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
 
-from app.agent.nodes import call_llm_node, tool_call_node, should_continue
+from app.agent.nodes import (
+    call_llm_node, 
+    tool_call_node, 
+    should_continue,
+    get_iteration,
+    increment_iteration,
+    should_force_end,
+    build_force_end_prompt,
+    build_followup_prompt,
+    FORCE_END_PROMPT,
+)
 from app.agent.state import AgentState
 
 logger = logging.getLogger(__name__)
@@ -86,12 +96,15 @@ def make_config(tenant_id: str, conversation_id: str) -> dict:
     }
 
 
+# ═══════════════════════════════════════════════════════════════════ 流式执行 ═══════════════════════════════════════════════════════════════════
+
 async def astream_agent(
     graph: Any,
     tenant_id: str,
     user_id: str,
     conversation_id: str,
     message: str,
+    iteration_limit: int = 30,
 ) -> AsyncIterator[str]:
     """
     以流式方式运行 Agent，逐 token yield AI 回复内容。
@@ -106,6 +119,7 @@ async def astream_agent(
         user_id: 用户 ID。
         conversation_id: 会话 ID。
         message: 用户输入消息。
+        iteration_limit: 最大迭代次数。
 
     Yields:
         str: 每个 AI 回复 token（内容片段）。
@@ -117,18 +131,28 @@ async def astream_agent(
         "tenant_id": tenant_id,
         "user_id": user_id,
         "conversation_id": conversation_id,
+        "_iteration": 0,  # 初始化迭代计数器
     }
 
     logger.info(
-        "astream_agent start: thread_id=%s:%s, user=%s",
+        "astream_agent start: thread_id=%s:%s, user=%s, iteration_limit=%d",
         tenant_id,
         conversation_id,
         user_id,
+        iteration_limit,
     )
 
     # 使用 astream_events 捕获流式 token
     async for event in graph.astream_events(input_state, config, version="v2"):
         kind = event.get("event")
+        
+        # 检查迭代次数
+        if "_iteration" in event.get("data", {}).get("state", {}).get("channel_values", {}):
+            iteration = event["data"]["state"]["channel_values"]["_iteration"]
+            if iteration >= iteration_limit:
+                logger.info("达到最大迭代次数 %d，强制结束", iteration_limit)
+                break
+        
         # on_chat_model_stream: LLM 流式输出 token
         if kind == "on_chat_model_stream":
             chunk = event.get("data", {}).get("chunk")

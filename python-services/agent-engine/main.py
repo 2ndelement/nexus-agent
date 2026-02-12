@@ -3,7 +3,6 @@ main.py — FastAPI 应用入口
 
 服务端口：8001
 支持 Nacos 服务注册
-支持 Agent 中断控制
 """
 from __future__ import annotations
 
@@ -17,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.chat import router as chat_router
 from app.api.v1.control import router as control_router
-from app.api.v1.websocket_control import router as websocket_router
+from app.api.v1.websocket import router as websocket_router
 from app.schemas import HealthResponse
 from common.nacos import create_registry, NacosServiceRegistry
 

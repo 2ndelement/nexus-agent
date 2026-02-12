@@ -1,12 +1,13 @@
 """
 app/control/__init__.py — 控制模块
 """
-from app.control.session_manager import SessionManager, ConversationStatus
-from app.control.interrupt_controller import InterruptController, AgentRunner
+from app.control.followup_queue import FollowupQueue, FollowupMessage, get_followup_queue
+from app.control.loop_controller import LoopController, get_loop_controller
 
 __all__ = [
-    "SessionManager",
-    "ConversationStatus", 
-    "InterruptController",
-    "AgentRunner",
+    "FollowupQueue",
+    "FollowupMessage",
+    "get_followup_queue",
+    "LoopController",
+    "get_loop_controller",
 ]

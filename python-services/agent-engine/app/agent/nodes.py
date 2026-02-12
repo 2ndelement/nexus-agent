@@ -4,7 +4,7 @@ app/agent/nodes.py — LangGraph 图节点函数
 节点列表：
   1. call_llm_node   — 调用 LLM，可能返回 tool_calls
   2. tool_call_node  — 执行工具调用，将结果追加到 messages
-  3. should_continue  — 条件路由：有 tool_calls → 工具节点，无 → 结束
+  3. should_continue — 条件路由：有 tool_calls → 工具节点，无 → 结束
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import logging
 from typing import Any, Literal
 
 import httpx
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
 from app.agent.state import AgentState
@@ -22,9 +22,21 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# ─────────────────── 工具定义（从 tool-registry 获取） ───────────────────
+# ═══════════════════════════════════════════════════════════════════ 常量 ═══════════════════════════════════════════════════════════════════
 
-# 内置工具的 OpenAI function schema
+# 强制结束 Prompt
+FORCE_END_PROMPT = """你已达到最大工具调用次数（{max_iterations}次）。
+请基于之前的分析和工具调用结果，直接回答用户的问题。
+不要调用任何新工具，给出最终答案。"""
+
+# Followup 注入 Prompt
+FOLLOWUP_PROMPT = """[用户插入了新消息]
+{followups}
+
+请继续回答用户的问题。"""
+
+# ═══════════════════════════════════════════════════════════════════ 内置工具定义 ═══════════════════════════════════════════════════════════════════
+
 BUILTIN_TOOLS = [
     {
         "type": "function",
@@ -90,18 +102,11 @@ BUILTIN_TOOLS = [
     },
 ]
 
-
-# ─────────────────── 工具执行 ───────────────────
+# ═══════════════════════════════════════════════════════════════════ 工具执行 ═══════════════════════════════════════════════════════════════════
 
 async def _execute_tool(tool_name: str, arguments: dict) -> str:
     """
     通过 tool-registry HTTP 接口执行工具。
-    
-    tool-registry 提供 POST /api/tools/execute:
-    {
-        "name": "calculator",
-        "parameters": {"expression": "2+3"}
-    }
     """
     url = f"{settings.tool_registry_url}/api/tools/execute"
     payload = {
@@ -114,7 +119,6 @@ async def _execute_tool(tool_name: str, arguments: dict) -> str:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
-            # tool-registry 返回 {"code": 200, "data": {"result": "..."}}
             if data.get("code") == 200:
                 result = data.get("data", {}).get("result", "")
                 return str(result)
@@ -126,8 +130,7 @@ async def _execute_tool(tool_name: str, arguments: dict) -> str:
         logger.exception("工具执行异常: %s", tool_name)
         return f"工具执行异常: {str(e)}"
 
-
-# ─────────────────── LLM 构建 ───────────────────
+# ═══════════════════════════════════════════════════════════════════ LLM 构建 ═══════════════════════════════════════════════════════════════════
 
 def _build_llm() -> ChatOpenAI:
     """构建绑定了工具的 LLM 实例。"""
@@ -138,20 +141,12 @@ def _build_llm() -> ChatOpenAI:
         temperature=settings.llm_temperature,
         streaming=True,
     )
-    # 绑定工具定义，让 LLM 知道可用工具
     return llm.bind_tools(BUILTIN_TOOLS)
 
-
-# ─────────────────── 节点函数 ───────────────────
+# ═══════════════════════════════════════════════════════════════════ 节点函数 ═══════════════════════════════════════════════════════════════════
 
 async def call_llm_node(state: AgentState) -> dict:
-    """
-    LLM 调用节点。
-    
-    调用 LLM，LLM 可能返回：
-    - 普通文本回复 → 进入 END
-    - tool_calls → 进入 tool_call_node
-    """
+    """LLM 调用节点。"""
     llm = _build_llm()
     messages = state["messages"]
 
@@ -174,17 +169,10 @@ async def call_llm_node(state: AgentState) -> dict:
 
     return {"messages": [response]}
 
-
 async def tool_call_node(state: AgentState) -> dict:
-    """
-    工具执行节点。
-    
-    从最后一条 AIMessage 中提取 tool_calls，
-    逐个执行并将结果作为 ToolMessage 追加到 messages。
-    """
+    """工具执行节点。"""
     messages = state["messages"]
     
-    # 找最后一条 AIMessage
     last_ai_msg = None
     for msg in reversed(messages):
         if isinstance(msg, AIMessage):
@@ -213,21 +201,46 @@ async def tool_call_node(state: AgentState) -> dict:
 
     return {"messages": tool_messages}
 
-
-# ─────────────────── 条件路由 ───────────────────
-
 def should_continue(state: AgentState) -> Literal["tool_call", "end"]:
-    """
-    条件路由函数：
-    - LLM 返回了 tool_calls → 进入 "tool_call" 节点
-    - LLM 返回普通文本 → 进入 "end"
-    """
+    """条件路由函数。"""
     messages = state["messages"]
-    
-    # 检查最后一条 AIMessage
     last_msg = messages[-1] if messages else None
     
     if isinstance(last_msg, AIMessage) and last_msg.tool_calls:
         return "tool_call"
     
     return "end"
+
+# ═══════════════════════════════════════════════════════════════════ 辅助函数 ═══════════════════════════════════════════════════════════════════
+
+def get_iteration(state: AgentState) -> int:
+    """获取当前迭代次数"""
+    return state.get("_iteration", 0)
+
+def increment_iteration(state: AgentState) -> dict:
+    """增加迭代次数"""
+    current = get_iteration(state)
+    return {"_iteration": current + 1}
+
+def should_force_end(state: AgentState) -> bool:
+    """检查是否应该强制结束"""
+    from app.control.loop_controller import get_loop_controller
+    
+    loop_ctrl = get_loop_controller()
+    iteration = get_iteration(state)
+    return loop_ctrl.should_force_end(iteration)
+
+def build_force_end_prompt() -> str:
+    """构建强制结束 Prompt"""
+    from app.control.loop_controller import get_loop_controller
+    
+    loop_ctrl = get_loop_controller()
+    return loop_ctrl.get_force_end_prompt()
+
+def build_followup_prompt(followups: list[str]) -> str:
+    """构建 followup 注入 Prompt"""
+    if not followups:
+        return ""
+    
+    followup_text = "\n".join(f"{i+1}. {f}" for i, f in enumerate(followups))
+    return FOLLOWUP_PROMPT.format(followups=followup_text)
