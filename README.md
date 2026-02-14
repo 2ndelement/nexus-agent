@@ -1,384 +1,305 @@
 # NexusAgent 架构设计文档
 
-> 基于技术调研结论的最终技术选型与各层设计
+> 基于技术调研论的最终技术选型与各层设计
 
 ---
 
 ## 1. 系统架构总览
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
+┌────────────────────────────────────────────────────────────────────────┐
 │                           接入层 (Clients)                                  │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────────┐   │
-│  │ WebChat │  │   QQ    │  │ 飞书    │  │Discord  │  │  REST API   │   │
-│  │ (Vue3)  │  │(OneBot) │  │  SDK    │  │   SDK   │  │  (第三方)    │   │
-│  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘  └──────┬──────┘   │
-└───────┼────────────┼────────────┼────────────┼──────────────┼───────────┘
-        │            │            │            │              │
-        └────────────┴────────────┴────────────┴──────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
+│   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐             │
+│   │ WebChat  │   │   QQ    │   │  飞书    │   │ REST API │             │
+│   │  (Vue3)  │   │(OneBot) │   │   SDK    │   │ (第三方) │             │
+│   └──────────┘   └──────────┘   └──────────┘   └──────────┘             │
+└────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
 │                    Spring Cloud Gateway (Port 8080)                         │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                   │
-│  │ JWT 认证     │  │ Tenant ID    │  │ 限流         │                   │
-│  │ (Auth)      │  │ 提取注入     │  │ (Sentinel)  │                   │
-│  └──────────────┘  └──────────────┘  └──────────────┘                   │
-└─────────────────────────────────┬───────────────────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
+│   ┌──────────┐   ┌──────────┐   ┌──────────┐                          │
+│   │ JWT 认证  │   │ Tenant ID │   │  限流     │                          │
+│   │ (Auth)   │   │  注入     │   │(Sentinel)│                          │
+│   └──────────┘   └──────────┘   └──────────┘                          │
+└────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
 │                          Java 微服务层                                      │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────────┐  │
-│  │  Auth   │  │ Tenant  │  │Session  │  │Knowledge │  │   Config   │  │
-│  │ 认证服务 │  │租户服务 │  │会话服务 │  │知识库服务 │  │Agent配置   │  │
-│  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘  └──────┬──────┘  │
-│       │            │            │            │               │            │
-│       └────────────┴────────────┴────────────┴───────────────┘            │
-│                              │                                             │
-│                    Nacos (服务注册与配置)                                   │
-└──────────────────────────────┼─────────────────────────────────────────────┘
-                               │ (gRPC/REST)
-                               ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
+│   ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐            │
+│   │  Auth  │  │ Tenant │  │Session │  │Knowledge│  │  MCP   │            │
+│   │ 认证服务│  │租户服务│  │会话服务│  │知识库服务│  │ Manager │            │
+│   └────────┘  └────────┘  └────────┘  └────────┘  └────────┘            │
+│                                                                     │
+│   ┌──────────────────────────────────────────────────────────────┐     │
+│   │                    Nexus Platform (WebChat + QQ)               │     │
+│   │  ┌────────────────┐    ┌────────────────┐                │     │
+│   │  │ WebSocket Handler│    │  QQ Adapter    │                │     │
+│   │  │  (流式直连)      │    │  (MQ 异步)    │                │     │
+│   │  └────────────────┘    └────────────────┘                │     │
+│   └──────────────────────────────────────────────────────────────┘     │
+│                                                                     │
+│                        Nacos (服务注册与配置)                                │
+└────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
 │                          Python AI 服务层                                   │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │
-│  │ Agent Engine│  │  LLM Proxy  │  │ RAG Service │  │Memory Service│     │
-│  │ (LangGraph) │  │  (LLM调用)  │  │ (混合检索)  │  │ (会话记忆)   │     │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  │
-│         │                 │                  │                 │            │
-│  ┌──────┴──────┐  ┌──────┴──────┐  ┌──────┴──────┐                 │
-│  │Tool Registry│  │ Embed Worker │  │  Milvus    │                 │
-│  │ (工具注册)  │  │ (向量嵌入)   │  │ (向量库)   │                 │
-│  └─────────────┘  └─────────────┘  └─────────────┘                 │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                     │
-                              (消息队列)
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          基础设施层                                         │
-│  ┌────────┐  ┌────────┐  ┌────────┐  ┌─────────┐  ┌──────────┐        │
-│  │ MySQL 8│  │ Redis  │  │ Milvus │  │RabbitMQ │  │  MinIO   │        │
-│  │(租户数据)│  │(缓存/会话)│  │(向量库)│  │(消息队列)│  │(文件存储)│        │
-│  └────────┘  └────────┘  └────────┘  └─────────┘  └──────────┘        │
-│                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │            Prometheus + Grafana (监控)                              │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────────┘
+│   ┌──────────────────────────────────────────────────────────────┐   │
+│   │                    Agent Engine (LangGraph)                     │   │
+│   │   ┌────────────┐  ┌────────────┐  ┌────────────────────┐     │   │
+│   │   │ ToolManager│  │LoopController│  │ Followup Queue   │     │   │
+│   │   │ (工具管理) │  │ (最大30次) │  │   (消息注入)     │     │   │
+│   │   └────────────┘  └────────────┘  └────────────────────┘     │   │
+│   └──────────────────────────────────────────────────────────────┘   │
+│   ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐     │
+│   │ LLM Proxy │  │Tool Registry│  │  Memory  │  │   RAG    │     │
+│   │ (LLM调用)│  │ (工具执行) │  │ (会话记忆)│  │ (知识检索)│     │
+│   └───────────┘  └───────────┘  └───────────┘  └───────────┘     │
+│                                                                     │
+│                        Nacos (服务注册)                                      │
+└────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                          基础设层                                              │
+│   ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐         │
+│   │ MySQL 8│  │ Redis  │  │ Milvus │  │RabbitMQ│  │ MinIO  │         │
+│   │(租户数据)│  │(缓存/会话)│  │(向量库)│  │(消息队列)│  │(文件存储)│         │
+│   └────────┘  └────────┘  └────────┘  └────────┘  └────────┘         │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## 2. 核心模块设计
 
-### 2.1 认证与授权 (Auth Service)
+### 2.1 Agent Engine
 
-**职责：** 用户登录、JWT 签发、Token 刷新
+Agent Engine 是系统的核心 AI 引擎，基于 LangGraph 实现。
 
-**技术栈：** Spring Boot 3 + Spring Security + Redis
+#### 2.1.1 工具系统
 
-**关键设计：**
-```java
-// JWT 包含的信息
-Claims {
-    "sub": "user_id",
-    "tenant_id": "tenant_123",
-    "roles": ["ADMIN", "USER"],
-    "permissions": ["chat:read", "chat:write", "knowledge:admin"]
-}
-```
+**工具来源**：
+| 来源 | 说明 | 权限控制 |
+|------|------|----------|
+| 内置工具 (BUILTIN) | calculator, web_search, sandbox_execute | 所有用户可见 |
+| MCP Server (MCP) | 用户配置的外部 MCP Server | 按 Agent 绑定 |
+| 自定义工具 (CUSTOM) | 租户自定义工具 | 按角色权限 |
 
-**Token 类型：**
-| 类型 | 有期限 | 用途 |
-|------|--------|------|
-| Access Token | 2 小时 | API 调用 |
-| Refresh Token | 7 天 | 刷新 Access Token |
-
----
-
-### 2.2 租户服务 (Tenant Service)
-
-**职责：** 租户 CRUD + 成员管理 + 多租户隔离
-
-**技术栈：** Spring Boot 3 + MyBatis-Plus + MySQL
-
-**隔离策略：**
-- 数据隔离：每个租户独立数据库或表前缀
-- 认证隔离：JWT 中携带 tenant_id
-- 资源隔离：Agent Engine 使用 thread_id = `{tenant_id}:{conversation_id}`
-
----
-
-### 2.3 会话服务 (Session Service)
-
-**职责：** 会话 CRUD、消息管理、上下文管理
-
-**核心 API：**
-```java
-POST /api/session/conversations     // 创建会话
-GET  /api/session/conversations     // 列表查询
-GET  /api/session/conversations/{id} // 获取会话详情
-POST /api/session/messages          // 发送消息
-```
-
----
-
-### 2.4 Agent 引擎 (Agent Engine)
-
-**职责：** LangGraph Agent 编排、LLM 调用、Tool 执行
-
-**技术栈：** Python + LangGraph + FastAPI + MySQL Checkpoint
-
-**核心特性：**
-- 状态持久化：AIOMySQLSaver 支持多租户隔离
-- 流式输出：SSE (Server-Sent Events)
-- Tool 调用链：自动识别并执行注册的工具
-
-**架构：**
-```python
-# LangGraph 图定义
-builder = StateGraph(AgentState)
-builder.add_node("call_llm", call_llm_node)
-builder.add_edge(START, "call_llm")
-builder.add_edge("call_llm", END)
-```
-
-**端口：** 8001
-
----
-
-### 2.5 LLM 代理 (LLM Proxy)
-
-**职责：** 统一 LLM 调用、多模型路由、Token 统计
-
-**技术栈：** Python + FastAPI + OpenAI SDK
-
-**核心特性：**
-- OpenAI 协议兼容
-- 多模型路由：MiniMax / Claude / OpenAI / Azure OpenAI
-- Token 用量统计与配额控制
-
-**端口：** 8010
-
----
-
-### 2.6 RAG 服务 (RAG Service)
-
-**职责：** 知识库管理、文档处理、混合检索
-
-**技术栈：** Python + FastAPI + Milvus + BM25
-
-**检索流程：**
-1. 用户查询 → 向量化 (embedding)
-2. 向量检索 (Milvus) + 关键词检索 (BM25)
-3. RRF 融合排序
-4. 返回 top-k 结果
-
-**端口：** 8003
-
----
-
-### 2.7 知识库服务 (Knowledge Service)
-
-**职责：** 知识库 CRUD、文档上传、文本提取、分块
-
-**技术栈：** Java + Spring Boot + MinIO + PDFBox
-
-**支持格式：** PDF, DOCX, TXT, Markdown
-
----
-
-### 2.8 工具注册中心 (Tool Registry)
-
-**职责：** 工具注册、工具发现、工具调用
-
-**技术栈：** Python + FastAPI
-
-**端口：** 8011
-
----
-
-### 2.9 记忆服务 (Memory Service)
-
-**职责：** 会话记忆存储与检索
-
-**技术栈：** Python + FastAPI + MySQL
-
-**端口：** 8012
-
----
-
-### 2.10 Agent 配置服务 (Agent Config Service)
-
-**职责：** Agent 配置管理、Skill 系统
-
-**技术栈：** Java + Spring Boot
-
-**核心功能：**
-- Agent 配置 CRUD
-- Skill 技能定义与管理
-- 预置 Agent 模板
-
-**端口：** 8006
-
----
-
-## 3. 网关设计 (Gateway)
-
-**端口：** 8080
-
-**核心功能：**
-1. **JWT 认证：** 验证 Token 有效性，提取用户信息
-2. **租户注入：** 将 tenant_id 注入到请求头
-3. **路由转发：** 根据路径规则分发到后端服务
-4. **限流保护：** Sentinel 限流
-
-**路由规则：**
-```
-/api/auth/*        → auth-service:8005
-/api/tenant/*      → tenant-service:8002
-/api/session/*     → session-service:8004
-/api/knowledge/*   → knowledge-service:8007
-/api/agent/*       → agent-engine:8001
-/api/billing/*     → billing-service:8009
-/api/config/*      → agent-config:8006
-```
-
----
-
-## 4. 消息队列设计
-
-**中间件：** RabbitMQ
-
-**用途：**
-- 异步任务：文档处理、embedding 生成
-- 事件通知：Token 刷新、会话状态变更
-- 流量削峰：高并发场景下的请求缓冲
-
----
-
-## 5. 服务端口汇总
-
-| 服务 | 端口 | 协议 | 说明 |
-|------|------|------|------|
-| Gateway | 8080 | HTTP | 统一入口 |
-| Auth | 8005 | HTTP | 认证服务 |
-| Tenant | 8002 | HTTP | 租户服务 |
-| Session | 8004 | HTTP | 会话服务 |
-| Knowledge | 8007 | HTTP | 知识库服务 |
-| Agent Config | 8006 | HTTP | Agent 配置 |
-| Billing | 8009 | HTTP | 计费服务 |
-| Agent Engine | 8001 | HTTP | Agent 引擎 |
-| LLM Proxy | 8010 | HTTP | LLM 代理 |
-| RAG Service | 8003 | HTTP | RAG 服务 |
-| Tool Registry | 8011 | HTTP | 工具注册 |
-| Memory Service | 8012 | HTTP | 记忆服务 |
-
----
-
-## 6. 技术栈总结
-
-### Java 服务
-- **框架：** Spring Boot 3 + Spring Cloud
-- **ORM：** MyBatis-Plus
-- **数据库：** MySQL 8
-- **缓存：** Redis
-- **消息队列：** RabbitMQ
-
-### Python 服务
-- **框架：** FastAPI
-- **AI 框架：** LangChain / LangGraph
-- **向量库：** Milvus
-- **LLM：** OpenAI / MiniMax / Anthropic
-
-### 前端
-- **框架：** Vue 3
-- **UI：** Tailwind CSS
-- **状态管理：** Pinia
-
----
-
-## 7. 部署架构
-
-### 开发环境
-- 所有服务本地运行
-- MySQL/Redis/MinIO 使用 Docker
-
-### 生产环境
-- Kubernetes (K8s)
-- 每个微服务独立部署
-- MySQL/Redis/Milvus 使用云服务或集群
-
----
-
-*文档版本：v1.0*
-*最后更新：2026-03-17*
-
----
-
-## 8. Embed Worker (embed-worker)
-
-**职责：** 异步文档向量化 — 消费 RabbitMQ 消息 → 调用 SentenceTransformer → 写入 ChromaDB
-
-**技术栈：** Python + aio-pika + chromadb + sentence-transformers
-
-**消息队列：**
-- 消费队列：`nexus.embed.tasks`
-- 消息格式：tenant_id, kb_id, doc_id, chunks[]
-
-**端口：** N/A（纯消费者）
-
----
-
-## 9. Sandbox Service (sandbox-service)
-
-**职责：** 隔离容器中执行任意代码（Python/Bash）
-
-**技术栈：** Python + FastAPI + aiodocker (Docker)
-
-**安全特性：**
-- 网络隔离（容器无外网访问）
-- 资源限制：内存 256MB，CPU 0.5 核
-- 超时控制：最长 120 秒
-- 容器级隔离，每次执行创建临时容器
-
-**端口：** 8020
-
-**核心 API：**
-```python
-POST /execute
+**MCP Server 配置格式**：
+```json
+// SSE 模式
 {
-    "code": "print('hello')",
-    "language": "python",  # or "bash"
+    "transport": "sse",
+    "url": "https://mcp.example.com/sse",
+    "headers": {"Authorization": "Bearer xxx"},
     "timeout": 30
 }
+
+// Streamable HTTP 模式
+{
+    "transport": "streamable_http",
+    "url": "https://mcp.example.com/mcp",
+    "headers": {"Authorization": "Bearer xxx"}
+}
 ```
 
-**在 Tool Registry 中注册为 `sandbox_execute` 工具**
+#### 2.1.2 Agent Loop 控制
+
+- **最大循环次数**：30 次
+- **强制输出**：到达上限后强制得到最终输出
+- **强制输出 Prompt**：
+```
+你已达到最大工具调用次数（30次）。
+请基于之前的分析和工具调用结果，直接回答用户的问题。
+不要调用任何新工具，给出最终答案。
+```
+
+#### 2.1.3 Followup 队列
+
+用户可以在 Agent 执行过程中注入新消息：
+- 消息存储在 Redis 队列中
+- 每次工具调用后检查队列
+- 注入消息附加在 tool message 后面
+- 按顺序排队，统一注入到 prompt
+
+#### 2.1.4 会话控制
+
+| 功能 | 说明 |
+|------|------|
+| 停止 | 流式/非流式都能中途停止 |
+| 中断机制 | Redis flag + NodeInterrupt |
+
+### 2.2 MCP Manager
+
+MCP Server 管理服务（Java）：
+
+| 功能 | 说明 |
+|------|------|
+| CRUD | MCP Server 创建/更新/删除 |
+| 绑定 | 将 MCP Server 绑定到 Agent |
+| 测试连接 | 验证 MCP Server 可用性 |
+| 限制 | 每租户最多 100 个 MCP Server |
+
+### 2.3 权限系统
+
+**两次鉴权**：
+1. **Agent 端**：快速过滤，减少 LLM token 消耗
+2. **微服务端**：安全兜底，防止绕过
+
+**权限模型**：
+- 角色级别权限（role_tool_permission）
+- Agent-MCP 绑定（agent_mcp_binding）
+
+### 2.4 审计日志
+
+所有租户相关操作都记录审计日志：
+- 用户操作（创建/更新/删除）
+- MCP Server 操作
+- 工具执行记录
 
 ---
 
-## 10. 服务端口汇总（更新版）
+## 3. 数据流设计
 
-| 服务 | 端口 | 协议 |
+### 3.1 WebChat 流式链路（直接 HTTP）
+
+```
+WebSocket → WebChatWebSocketHandler → AgentService → HTTP SSE → agent-engine
+                                    ↓ 逐 token 推送
+                                 WebSocket 客户端
+```
+
+### 3.2 QQ Bot 非流式链路（MQ 异步）
+
+```
+QQ 消息 → platform → MQ inbound 队列
+                         ↓
+                agent-engine 消费 → 非流式调用 → MQ outbound 队列
+                         ↓
+                platform 消费 → QQ API
+```
+
+### 3.3 工具调用链路
+
+```
+Agent (LLM 返回 tool_call)
+         ↓
+ToolManager.check_permission() → 第一次鉴权
+         ↓
+Tool-Registry / MCP Executor → 第二次鉴权
+         ↓
+执行工具 + 记录审计日志
+```
+
+---
+
+## 4. 数据库设计
+
+### 4.1 新增表
+
+| 表名 | 说明 |
+|------|------|
+| mcp_server | MCP Server 配置 |
+| agent_mcp_binding | Agent-MCP 绑定 |
+| role_tool_permission | 角色-工具权限 |
+| audit_log | 审计日志 |
+| tool_execution_log | 工具调用记录 |
+| mcp_execution_log | MCP 调用记录 |
+
+### 4.2 Schema
+
+详见 `sql/V2__mcp_tools_audit.sql`
+
+---
+
+## 5. API 设计
+
+### 5.1 MCP Server
+
+| 接口 | 方法 | 说明 |
 |------|------|------|
-| Gateway | 8080 | HTTP |
-| Auth | 8005 | HTTP |
-| Tenant | 8002 | HTTP |
-| Session | 8004 | HTTP |
-| Knowledge | 8007 | HTTP |
-| Agent Config | 8006 | HTTP |
-| Billing | 8009 | HTTP |
-| Agent Engine | 8001 | HTTP |
-| LLM Proxy | 8010 | HTTP |
-| RAG Service | 8003 | HTTP |
-| Tool Registry | 8011 | HTTP |
-| Memory Service | 8012 | HTTP |
-| Sandbox Service | 8020 | HTTP |
-| Embed Worker | N/A | RabbitMQ |
+| /api/mcp/servers | GET | 列表 |
+| /api/mcp/servers | POST | 创建 |
+| /api/mcp/servers/{id} | PUT | 更新 |
+| /api/mcp/servers/{id} | DELETE | 删除 |
+| /api/mcp/servers/{id}/test | POST | 测试连接 |
+
+### 5.2 Agent-MCP 绑定
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| /api/agent/{id}/mcp | GET | 获取绑定列表 |
+| /api/agent/{id}/mcp/bind | POST | 绑定 |
+| /api/agent/{id}/mcp/{mcpId} | DELETE | 解绑 |
+
+### 5.3 角色权限
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| /api/role/{id}/tools | GET | 获取权限 |
+| /api/role/{id}/tools | POST | 设置权限 |
 
 ---
 
-*文档版本：v1.1*
-*最后更新：2026-03-17*
+## 6. Nacos 服务注册
+
+所有 Python 服务都通过 Nacos 进行服务发现：
+
+| 服务 | 服务名 | 端口 |
+|------|--------|------|
+| nexus-agent-engine | nexus-agent-engine | 8001 |
+| nexus-llm-proxy | nexus-llm-proxy | 8010 |
+| nexus-tool-registry | nexus-tool-registry | 8011 |
+| nexus-memory-service | nexus-memory-service | 8012 |
+| nexus-rag-service | nexus-rag-service | 8013 |
+| nexus-sandbox-service | nexus-sandbox-service | 8020 |
+
+---
+
+## 7. 启动命令
+
+```bash
+# 启动所有服务
+docker compose up -d
+
+# 单独启动 Python 服务
+cd python-services/agent-engine
+pip install -r requirements.txt
+python main.py
+```
+
+---
+
+## 8. 环境变量
+
+### 8.1 Python 服务
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| NACOS_ENABLED | 启用 Nacos | false |
+| NACOS_SERVER | Nacos 地址 | 127.0.0.1:8848 |
+| NACOS_SERVICE_NAME | 服务名 | - |
+| REDIS_HOST | Redis 地址 | 127.0.0.1 |
+| MYSQL_HOST | MySQL 地址 | 127.0.0.1 |
+
+### 8.2 MCP Server
+
+| 配置项 | 说明 |
+|--------|------|
+| transport | sse / streamable_http |
+| url | MCP Server 地址 |
+| headers | 认证头 |
+| timeout | 超时秒数 |
+
+---
+
+## 9. 待实现功能
+
+- [ ] MCP Server 实际连接测试
+- [ ] MCP 工具列表获取
+- [ ] 工具执行频率限制
+- [ ] Rerank 优化
+- [ ] 多模态支持
