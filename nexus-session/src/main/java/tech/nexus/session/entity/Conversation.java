@@ -5,19 +5,15 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
-
 import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
  * 会话实体。
- *
- * <p>对应数据库 {@code conversation} 表，convId 使用 UUID 字符串，非自增。
  */
 @Data
 @TableName("conversation")
 public class Conversation implements Serializable {
-
     private static final long serialVersionUID = 1L;
 
     /** 会话ID (UUID) */
@@ -30,10 +26,10 @@ public class Conversation implements Serializable {
     /** 用户ID */
     private Long userId;
 
-    /** 对话标题 */
+    /** 会话标题 */
     private String title;
 
-    /** 使用的 Agent 配置ID */
+    /** 使用的 Agent配置ID */
     private Long agentId;
 
     /** 使用的模型 */
@@ -46,6 +42,9 @@ public class Conversation implements Serializable {
 
     /** 消息数量 */
     private Integer messageCount;
+
+    /** 会话开始时的可用工具列表（JSON） */
+    private String toolList;
 
     /** 创建时间 */
     @TableField(fill = com.baomidou.mybatisplus.annotation.FieldFill.INSERT)
