@@ -13,7 +13,6 @@ import json
 import logging
 from typing import Any, Literal
 
-import httpx
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
@@ -22,20 +21,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# ═══════════════════════════════════════════════════════════════════ 常量 ═══════════════════════════════════════════════════════════════════
-
-# 强制结束 Prompt
-FORCE_END_PROMPT = """你已达到最大工具调用次数（{max_iterations}次）。
-请基于之前的分析和工具调用结果，直接回答用户的问题。
-不要调用任何新工具，给出最终答案。"""
-
-# Followup 注入 Prompt
-FOLLOWUP_PROMPT = """[用户插入了新消息]
-{followups}
-
-请继续回答用户的问题。"""
-
-# ═══════════════════════════════════════════════════════════════════ 内置工具定义 ═══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════ 内置工具定义 ═══════════════════════════════════════════════════════════════
 
 BUILTIN_TOOLS = [
     {
@@ -92,82 +78,136 @@ BUILTIN_TOOLS = [
                     },
                     "timeout": {
                         "type": "integer",
-                        "default": 30,
-                        "description": "超时秒数",
+                        "default": 60,
+                        "minimum": 1,
+                        "maximum": 3600,
+                        "description": "超时秒数（1-3600）",
                     },
                 },
                 "required": ["code"],
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "skill_browser",
+            "description": "浏览和管理 Skill 技能文件。列出技能、读取 SKILL.md、读取技能文件。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "read", "read_file", "tree"],
+                        "description": "操作类型",
+                    },
+                    "skill_name": {
+                        "type": "string",
+                        "description": "技能名称",
+                    },
+                    "file_path": {
+                        "type": "string",
+                        "description": "文件路径",
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
 ]
 
-# ═══════════════════════════════════════════════════════════════════ 工具执行 ═══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════ 工具执行 ═══════════════════════════════════════════════════════════════
 
 async def _execute_tool(tool_name: str, arguments: dict) -> str:
-    """
-    通过 tool-registry HTTP 接口执行工具。
-    """
-    url = f"{settings.tool_registry_url}/api/tools/execute"
-    payload = {
-        "name": tool_name,
-        "parameters": arguments,
-    }
-    
+    """执行工具"""
+    if tool_name == "skill_browser":
+        return await _execute_skill_browser(arguments)
+    elif tool_name == "calculator":
+        return _execute_calculator(arguments)
+    elif tool_name == "sandbox_execute":
+        return await _execute_sandbox(arguments)
+    elif tool_name == "web_search":
+        return await _execute_search(arguments)
+    else:
+        return f"未知工具: {tool_name}"
+
+
+async def _execute_skill_browser(arguments: dict) -> str:
+    """执行 Skill 浏览器工具"""
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            if data.get("code") == 200:
-                result = data.get("data", {}).get("result", "")
-                return str(result)
-            else:
-                return f"工具执行失败: {data.get('msg', 'unknown error')}"
-    except httpx.TimeoutException:
-        return f"工具 {tool_name} 执行超时"
+        from app.tools.skill_browser import skill_browser as skill_browser_func
+        result = await skill_browser_func(
+            action=arguments.get("action"),
+            tenant_id=arguments.get("tenant_id", ""),
+            skill_name=arguments.get("skill_name"),
+            file_path=arguments.get("file_path"),
+        )
+        return json.dumps(result, ensure_ascii=False)
     except Exception as e:
-        logger.exception("工具执行异常: %s", tool_name)
-        return f"工具执行异常: {str(e)}"
+        logger.error(f"skill_browser 执行失败: {e}")
+        return f"skill_browser 执行失败: {e}"
 
-# ═══════════════════════════════════════════════════════════════════ LLM 构建 ═══════════════════════════════════════════════════════════════════
 
-def _build_llm() -> ChatOpenAI:
-    """构建绑定了工具的 LLM 实例。"""
+def _execute_calculator(arguments: dict) -> str:
+    """计算器"""
+    try:
+        expression = arguments.get("expression", "")
+        result = eval(expression)
+        return str(result)
+    except Exception as e:
+        return f"计算错误: {e}"
+
+
+async def _execute_sandbox(arguments: dict) -> str:
+    """沙箱执行"""
+    import httpx
+    url = f"{settings.sandbox_url}/execute"
+    try:
+        async with httpx.AsyncClient(timeout=arguments.get("timeout", 60) as client:
+        resp = await client.post(url, json={
+            "code": arguments.get("code"),
+            "language": arguments.get("language", "python"),
+            "timeout": arguments.get("timeout", 60),
+        })
+        if resp.status_code == 200:
+            return resp.text
+        else:
+            return f"执行失败: {resp.status_code}"
+    except Exception as e:
+        return f"执行失败: {e}"
+
+
+async def _execute_search(arguments: dict) -> str:
+    """网络搜索"""
+    return "搜索功能开发中"
+
+
+# ═══════════════════════════════════════════════════════════════ 节点函数 ═══════════════════════════════════════════════════════════════
+
+async def call_llm_node(state: AgentState) -> dict:
+    """LLM 调用节点。"""
+    from langchain_openai import ChatOpenAI
+    
     llm = ChatOpenAI(
         model=settings.llm_model,
         api_key=settings.openai_api_key,
         base_url=settings.openai_base_url,
         temperature=settings.llm_temperature,
         streaming=True,
-    )
-    return llm.bind_tools(BUILTIN_TOOLS)
-
-# ═══════════════════════════════════════════════════════════════════ 节点函数 ═══════════════════════════════════════════════════════════════════
-
-async def call_llm_node(state: AgentState) -> dict:
-    """LLM 调用节点。"""
-    llm = _build_llm()
+    ).bind_tools(BUILTIN_TOOLS)
+    
     messages = state["messages"]
-
-    logger.debug(
-        "call_llm_node: tenant=%s, conv=%s, history_len=%d",
-        state.get("tenant_id"),
-        state.get("conversation_id"),
-        len(messages),
-    )
-
+    
     try:
-        response: AIMessage = await asyncio.wait_for(
+        response = await asyncio.wait_for(
             llm.ainvoke(messages),
             timeout=settings.llm_timeout,
         )
-    except asyncio.TimeoutError as exc:
-        raise TimeoutError(
-            f"LLM 调用超时（>{settings.llm_timeout}s）"
-        ) from exc
-
+    except asyncio.TimeoutError:
+        return {"messages": [AIMessage(content="请求超时")]}
+    
     return {"messages": [response]}
+
 
 async def tool_call_node(state: AgentState) -> dict:
     """工具执行节点。"""
@@ -175,72 +215,36 @@ async def tool_call_node(state: AgentState) -> dict:
     
     last_ai_msg = None
     for msg in reversed(messages):
-        if isinstance(msg, AIMessage):
+        if isinstance(msg, AIMessage) and msg.tool_calls:
             last_ai_msg = msg
             break
-
+    
     if not last_ai_msg or not last_ai_msg.tool_calls:
         return {"messages": []}
-
+    
     tool_messages = []
     for tool_call in last_ai_msg.tool_calls:
         tool_name = tool_call["name"]
         tool_args = tool_call["args"]
         tool_id = tool_call["id"]
-
-        logger.info("执行工具: name=%s, args=%s", tool_name, tool_args)
-
+        
+        logger.info("执行工具: %s", tool_name)
+        
         result = await _execute_tool(tool_name, tool_args)
-
-        tool_messages.append(
-            ToolMessage(
-                content=result,
-                tool_call_id=tool_id,
-            )
-        )
-
+        
+        tool_messages.append(ToolMessage(
+            content=result,
+            tool_call_id=tool_id,
+        ))
+    
     return {"messages": tool_messages}
 
+
 def should_continue(state: AgentState) -> Literal["tool_call", "end"]:
-    """条件路由函数。"""
+    """条件路由"""
     messages = state["messages"]
     last_msg = messages[-1] if messages else None
     
     if isinstance(last_msg, AIMessage) and last_msg.tool_calls:
         return "tool_call"
-    
     return "end"
-
-# ═══════════════════════════════════════════════════════════════════ 辅助函数 ═══════════════════════════════════════════════════════════════════
-
-def get_iteration(state: AgentState) -> int:
-    """获取当前迭代次数"""
-    return state.get("_iteration", 0)
-
-def increment_iteration(state: AgentState) -> dict:
-    """增加迭代次数"""
-    current = get_iteration(state)
-    return {"_iteration": current + 1}
-
-def should_force_end(state: AgentState) -> bool:
-    """检查是否应该强制结束"""
-    from app.control.loop_controller import get_loop_controller
-    
-    loop_ctrl = get_loop_controller()
-    iteration = get_iteration(state)
-    return loop_ctrl.should_force_end(iteration)
-
-def build_force_end_prompt() -> str:
-    """构建强制结束 Prompt"""
-    from app.control.loop_controller import get_loop_controller
-    
-    loop_ctrl = get_loop_controller()
-    return loop_ctrl.get_force_end_prompt()
-
-def build_followup_prompt(followups: list[str]) -> str:
-    """构建 followup 注入 Prompt"""
-    if not followups:
-        return ""
-    
-    followup_text = "\n".join(f"{i+1}. {f}" for i, f in enumerate(followups))
-    return FOLLOWUP_PROMPT.format(followups=followup_text)
