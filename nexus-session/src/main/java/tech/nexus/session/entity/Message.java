@@ -13,6 +13,8 @@ import java.time.LocalDateTime;
  * 消息实体。
  *
  * <p>对应数据库 {@code message} 表，消息 ID 使用数据库自增。
+ *
+ * V5 重构：使用 owner_type + owner_id 替代 tenant_id
  */
 @Data
 @TableName("message")
@@ -27,7 +29,13 @@ public class Message implements Serializable {
     /** 所属会话ID */
     private String conversationId;
 
-    /** 租户ID，冗余字段，便于隔离查询 */
+    /** 所有者类型：PERSONAL 或 ORGANIZATION */
+    private String ownerType;
+
+    /** 所有者ID：用户ID(PERSONAL) 或 组织ID(ORGANIZATION) */
+    private Long ownerId;
+
+    /** 兼容旧版 schema 的租户ID，V5 下与 ownerId 保持一致 */
     private Long tenantId;
 
     /** 消息角色：user/assistant/system/tool */

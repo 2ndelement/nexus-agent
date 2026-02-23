@@ -32,23 +32,35 @@ router = APIRouter()
 async def agent_websocket(websocket: WebSocket):
     """
     Agent WebSocket 接口
-    
-    URL: /api/v1/agent/ws/{conversation_id}?tenant_id=xxx&user_id=xxx
+
+    V5 重构：支持 owner_type + owner_id（优先）或 tenant_id（兼容）
+
+    URL: /api/v1/agent/ws/{conversation_id}?owner_type=PERSONAL&owner_id=xxx&user_id=xxx
+    或兼容旧版: /api/v1/agent/ws/{conversation_id}?tenant_id=xxx&user_id=xxx
     """
     await websocket.accept()
-    
+
     # 获取参数
     conversation_id = websocket.path_params.get("conversation_id", "default")
-    tenant_id = websocket.query_params.get("tenant_id", "default")
+
+    # V5: 优先使用 owner_type + owner_id，否则兼容 tenant_id
+    owner_type = websocket.query_params.get("owner_type")
+    owner_id = websocket.query_params.get("owner_id")
+    tenant_id = websocket.query_params.get("tenant_id")
     user_id = websocket.query_params.get("user_id", "anonymous")
-    
+
+    # 兼容处理：tenant_id -> PERSONAL + owner_id
+    if owner_type is None or owner_id is None:
+        owner_type = "PERSONAL"
+        owner_id = tenant_id or "default"
+
     session_client = get_session_client()
     interrupt_ctrl = await get_interrupt_controller()
     followup_queue = await get_followup_queue()
-    
+
     logger.info(
         f"[WebSocket] 连接建立: conv={conversation_id}, "
-        f"tenant={tenant_id}, user={user_id}"
+        f"owner_type={owner_type}, owner_id={owner_id}, user={user_id}"
     )
     
     # 发送连接成功消息
@@ -85,7 +97,7 @@ async def agent_websocket(websocket: WebSocket):
                     # 启动新任务
                     current_task = asyncio.create_task(
                         _process_message(
-                            websocket, conversation_id, tenant_id, user_id, content
+                            websocket, conversation_id, owner_type, owner_id, user_id, content
                         )
                     )
                 
@@ -150,7 +162,8 @@ async def agent_websocket(websocket: WebSocket):
 async def _process_message(
     websocket: WebSocket,
     conversation_id: str,
-    tenant_id: str,
+    owner_type: str,
+    owner_id: str,
     user_id: str,
     content: str,
 ):
@@ -158,11 +171,13 @@ async def _process_message(
     session_client = get_session_client()
     interrupt_ctrl = await get_interrupt_controller()
     followup_queue = await get_followup_queue()
-    
+
     # 保存用户消息
     await session_client.add_user_message(
         conversation_id=conversation_id,
-        tenant_id=tenant_id,
+        owner_type=owner_type,
+        owner_id=owner_id,
+        user_id=user_id,
         content=content,
     )
     
@@ -193,7 +208,8 @@ async def _process_message(
             
             async for token in astream_agent(
                 graph=graph,
-                tenant_id=tenant_id,
+                owner_type=owner_type,
+                owner_id=owner_id,
                 user_id=user_id,
                 conversation_id=conversation_id,
                 message=content,
@@ -216,7 +232,9 @@ async def _process_message(
         if full_response:
             await session_client.add_assistant_message(
                 conversation_id=conversation_id,
-                tenant_id=tenant_id,
+                owner_type=owner_type,
+                owner_id=owner_id,
+                user_id=user_id,
                 content=full_response,
             )
         

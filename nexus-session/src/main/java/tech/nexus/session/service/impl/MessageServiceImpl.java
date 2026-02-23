@@ -19,7 +19,8 @@ import java.util.List;
 /**
  * 消息服务实现。
  *
- * <p>所有查询必须携带 tenantId 条件；追加消息使用幂等 Key 防重复写入。
+ * <p>V5 重构：使用 owner_type + owner_id 替代 tenant_id
+ * 追加消息使用幂等 Key 防重复写入。
  */
 @Slf4j
 @Service
@@ -32,8 +33,8 @@ public class MessageServiceImpl {
 
     // ─── Redis Key 生成 ────────────────────────────────────────────────────────
 
-    private String recentMsgsKey(Long tenantId, String convId) {
-        return "nexus:" + tenantId + ":conv:" + convId + ":msgs:recent";
+    private String recentMsgsKey(String ownerType, Long ownerId, String convId) {
+        return "nexus:" + ownerType + ":" + ownerId + ":conv:" + convId + ":msgs:recent";
     }
 
     // ─── 获取消息历史（分页，按 create_time 升序）────────────────────────────
@@ -41,19 +42,21 @@ public class MessageServiceImpl {
     /**
      * 获取消息历史，强制校验会话归属，按 create_time 升序返回。
      */
-    public PageResult<Message> listMessages(Long tenantId, String convId, int page, int size) {
-        // 验证会话存在且属于该租户
-        conversationService.validateExists(tenantId, convId);
+    public PageResult<Message> listMessages(String ownerType, Long ownerId, String convId, int page, int size) {
+        // 验证会话存在且属于该空间
+        conversationService.validateExists(ownerType, ownerId, convId);
 
         long total = messageMapper.selectCount(
                 new LambdaQueryWrapper<Message>()
-                        .eq(Message::getTenantId, tenantId)
+                        .eq(Message::getOwnerType, ownerType)
+                        .eq(Message::getOwnerId, ownerId)
                         .eq(Message::getConversationId, convId));
 
         long offset = (long) (page - 1) * size;
         List<Message> messages = messageMapper.selectList(
                 new LambdaQueryWrapper<Message>()
-                        .eq(Message::getTenantId, tenantId)
+                        .eq(Message::getOwnerType, ownerType)
+                        .eq(Message::getOwnerId, ownerId)
                         .eq(Message::getConversationId, convId)
                         .orderByAsc(Message::getCreateTime)
                         .last("LIMIT " + size + " OFFSET " + offset));
@@ -67,15 +70,16 @@ public class MessageServiceImpl {
      * 追加消息，支持幂等：若 idempotentKey 已存在则返回已有消息，不重复写入。
      */
     @Transactional
-    public Message appendMessage(Long tenantId, String convId, AppendMessageRequest req) {
-        // 验证会话存在且属于该租户
-        conversationService.validateExists(tenantId, convId);
+    public Message appendMessage(String ownerType, Long ownerId, String convId, AppendMessageRequest req) {
+        // 验证会话存在且属于该空间
+        conversationService.validateExists(ownerType, ownerId, convId);
 
         // 幂等检查
         if (req.getIdempotentKey() != null && !req.getIdempotentKey().isBlank()) {
             Message existing = messageMapper.selectOne(
                     new LambdaQueryWrapper<Message>()
-                            .eq(Message::getTenantId, tenantId)
+                            .eq(Message::getOwnerType, ownerType)
+                            .eq(Message::getOwnerId, ownerId)
                             .eq(Message::getConversationId, convId)
                             .eq(Message::getIdempotentKey, req.getIdempotentKey())
                             .last("LIMIT 1"));
@@ -87,7 +91,9 @@ public class MessageServiceImpl {
 
         Message msg = new Message();
         msg.setConversationId(convId);
-        msg.setTenantId(tenantId);
+        msg.setOwnerType(ownerType);
+        msg.setOwnerId(ownerId);
+        msg.setTenantId(ownerId);
         msg.setRole(req.getRole());
         msg.setContent(req.getContent());
         msg.setTokens(req.getTokens() != null ? req.getTokens() : 0);
@@ -97,46 +103,48 @@ public class MessageServiceImpl {
         messageMapper.insert(msg);
 
         // 更新会话消息计数
-        conversationService.incrementMessageCount(tenantId, convId);
+        conversationService.incrementMessageCount(ownerType, ownerId, convId);
 
         // 清除最近消息缓存，下次查询时重建
-        redisTemplate.delete(recentMsgsKey(tenantId, convId));
+        redisTemplate.delete(recentMsgsKey(ownerType, ownerId, convId));
 
-        log.debug("追加消息 msgId={} convId={} tenantId={} role={}", msg.getId(), convId, tenantId, req.getRole());
+        log.debug("追加消息 msgId={} convId={} ownerType={} ownerId={} role={}", msg.getId(), convId, ownerType, ownerId, req.getRole());
         return msg;
     }
 
     // ─── 清空消息 ─────────────────────────────────────────────────────────────
 
     /**
-     * 清空会话下所有消息，强制校验 tenantId。
+     * 清空会话下所有消息，强制校验空间归属。
      */
     @Transactional
-    public void clearMessages(Long tenantId, String convId) {
+    public void clearMessages(String ownerType, Long ownerId, String convId) {
         // 验证会话归属
-        conversationService.validateExists(tenantId, convId);
+        conversationService.validateExists(ownerType, ownerId, convId);
 
         messageMapper.delete(
                 new LambdaQueryWrapper<Message>()
-                        .eq(Message::getTenantId, tenantId)
+                        .eq(Message::getOwnerType, ownerType)
+                        .eq(Message::getOwnerId, ownerId)
                         .eq(Message::getConversationId, convId));
 
         // 清除缓存
-        redisTemplate.delete(recentMsgsKey(tenantId, convId));
-        log.debug("清空消息 convId={} tenantId={}", convId, tenantId);
+        redisTemplate.delete(recentMsgsKey(ownerType, ownerId, convId));
+        log.debug("清空消息 convId={} ownerType={} ownerId={}", convId, ownerType, ownerId);
     }
 
     // ─── 按 convId 批量删除（归档会话时调用）─────────────────────────────────
 
     /**
-     * 删除指定会话下所有消息（仅限 tenantId 内）。
+     * 删除指定会话下所有消息（仅限同一空间内）。
      */
     @Transactional
-    public void deleteByConvId(Long tenantId, String convId) {
+    public void deleteByConvId(String ownerType, Long ownerId, String convId) {
         messageMapper.delete(
                 new LambdaQueryWrapper<Message>()
-                        .eq(Message::getTenantId, tenantId)
+                        .eq(Message::getOwnerType, ownerType)
+                        .eq(Message::getOwnerId, ownerId)
                         .eq(Message::getConversationId, convId));
-        redisTemplate.delete(recentMsgsKey(tenantId, convId));
+        redisTemplate.delete(recentMsgsKey(ownerType, ownerId, convId));
     }
 }

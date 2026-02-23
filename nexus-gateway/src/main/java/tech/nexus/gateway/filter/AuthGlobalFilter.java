@@ -110,10 +110,16 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         String rolesStr = (roles != null) ? String.join(",", roles) : "";
 
         // 6. 构造注入了鉴权信息的下游请求
-        ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
-                .header(NexusConstants.HEADER_TENANT_ID, tenantId != null ? tenantId : "")
-                .header(HEADER_USER_ID,  userId   != null ? userId   : "")
-                .header(HEADER_ROLES,    rolesStr)
+        // V5: 新 JWT 可能不再携带 tenantId，此时保留前端传入的 X-Tenant-Id / X-Context，避免覆盖为空
+        ServerHttpRequest.Builder requestBuilder = exchange.getRequest().mutate()
+                .header(HEADER_USER_ID, userId != null ? userId : "")
+                .header(HEADER_ROLES, rolesStr);
+
+        if (tenantId != null && !tenantId.isBlank()) {
+            requestBuilder.header(NexusConstants.HEADER_TENANT_ID, tenantId);
+        }
+
+        ServerHttpRequest mutatedRequest = requestBuilder
                 // 移除原始 Authorization，避免下游重复处理（可按需保留）
                 // .headers(h -> h.remove(NexusConstants.HEADER_AUTHORIZATION))
                 .build();

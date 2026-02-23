@@ -9,10 +9,11 @@ spring:
       host: ${REDIS_HOST:127.0.0.1}
       port: ${REDIS_PORT:6379}
       timeout: 3000ms
-  # Nacos 服务发现
+  # Nacos 服务发现 (本地开发时禁用)
   cloud:
     nacos:
       discovery:
+        enabled: true
         server-addr: ${NACOS_ADDR:127.0.0.1:8848}
         namespace: ${NACOS_NAMESPACE:}
         group: ${NACOS_GROUP:DEFAULT_GROUP}
@@ -57,7 +58,7 @@ spring:
             - StripPrefix=0
 
         - id: nexus-session
-          uri: lb://nexus-session
+          uri: http://127.0.0.1:8004
           predicates:
             - Path=/api/session/**
           filters:
@@ -91,12 +92,11 @@ spring:
           filters:
             - StripPrefix=0
 
-        # Python 微服务（通过 Nacos lb:// 路由）
-        # 现在 Python 服务已在 Nacos 注册，使用 lb:// 进行服务发现
+        # Python 微服务（直接 HTTP 路由，Nacos 未运行时使用）
         - id: nexus-agent-engine
-          uri: lb://nexus-agent-engine
+          uri: http://127.0.0.1:8001
           predicates:
-            - Path=/api/agent/**
+            - Path=/api/agent/**,/api/v1/agent/**,/api/v1/agents,/api/v1/agents/**,/api/v1/tenants/**,/api/v1/users/**
           filters:
             - StripPrefix=0
           metadata:
@@ -104,35 +104,35 @@ spring:
             connect-timeout: 5000
 
         - id: nexus-llm-proxy
-          uri: lb://nexus-llm-proxy
+          uri: http://127.0.0.1:8010
           predicates:
             - Path=/api/llm/**
           filters:
             - StripPrefix=0
 
         - id: nexus-tool-registry
-          uri: lb://nexus-tool-registry
+          uri: http://127.0.0.1:8012
           predicates:
             - Path=/api/tools/**
           filters:
             - StripPrefix=0
 
         - id: nexus-memory-service
-          uri: lb://nexus-memory-service
+          uri: http://127.0.0.1:8014
           predicates:
             - Path=/api/memory/**
           filters:
             - StripPrefix=0
 
         - id: nexus-rag-service
-          uri: lb://nexus-rag-service
+          uri: http://127.0.0.1:8013
           predicates:
             - Path=/api/rag/**
           filters:
             - StripPrefix=0
 
         - id: nexus-sandbox-service
-          uri: lb://nexus-sandbox-service
+          uri: http://127.0.0.1:8020
           predicates:
             - Path=/api/sandbox/**
           filters:
@@ -146,6 +146,9 @@ nexus:
   gateway:
     white-list:
       - /api/auth/**
+      - /api/v1/agents/**
+      - /api/v1/agent/**
+      - /api/session/**
       - /actuator/health
       - /actuator/info
 

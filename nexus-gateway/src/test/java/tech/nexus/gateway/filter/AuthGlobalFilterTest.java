@@ -1,7 +1,7 @@
 package tech.nexus.gateway.filter;
 
 import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.impl.DefaultClaims;
+import io.jsonwebtoken.Jwts;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -96,11 +96,12 @@ class AuthGlobalFilterTest {
         MockServerWebExchange exchange = MockServerWebExchange.from(request);
         when(whiteListConfig.isWhiteListed(anyString())).thenReturn(false);
 
-        DefaultClaims claims = new DefaultClaims();
-        claims.put(JwtUtils.CLAIM_USER_ID, "user-1");
-        claims.put(JwtUtils.CLAIM_TENANT_ID, "tenant-1");
-        claims.put(JwtUtils.CLAIM_ROLES, List.of("ADMIN"));
-        claims.setId("jti-001");
+        Claims claims = Jwts.claims()
+                .id("jti-001")
+                .add(JwtUtils.CLAIM_USER_ID, "user-1")
+                .add(JwtUtils.CLAIM_TENANT_ID, "tenant-1")
+                .add(JwtUtils.CLAIM_ROLES, List.of("ADMIN"))
+                .build();
 
         when(jwtUtils.parseToken("valid-token")).thenReturn(claims);
         when(valueOps.get("nexus:blacklist:jti-001")).thenReturn(null);
@@ -120,10 +121,11 @@ class AuthGlobalFilterTest {
         MockServerWebExchange exchange = MockServerWebExchange.from(request);
         when(whiteListConfig.isWhiteListed(anyString())).thenReturn(false);
 
-        DefaultClaims claims = new DefaultClaims();
-        claims.put(JwtUtils.CLAIM_USER_ID, "user-1");
-        claims.put(JwtUtils.CLAIM_TENANT_ID, "tenant-1");
-        claims.setId("jti-blacklisted");
+        Claims claims = Jwts.claims()
+                .id("jti-blacklisted")
+                .add(JwtUtils.CLAIM_USER_ID, "user-1")
+                .add(JwtUtils.CLAIM_TENANT_ID, "tenant-1")
+                .build();
 
         when(jwtUtils.parseToken("logged-out-token")).thenReturn(claims);
         // 该 jti 在黑名单中

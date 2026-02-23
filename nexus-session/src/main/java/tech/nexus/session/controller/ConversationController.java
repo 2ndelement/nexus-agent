@@ -28,16 +28,27 @@ public class ConversationController {
 
     /**
      * 创建会话。
+     *
+     * V5 重构：支持 X-Owner-Type + X-Owner-Id（优先）或 X-Tenant-Id（兼容）
      */
     @PostMapping
     public Result<Conversation> create(
-            @RequestHeader("X-Tenant-Id") Long tenantId,
+            @RequestHeader(value = "X-Owner-Type", required = false) String ownerType,
+            @RequestHeader(value = "X-Owner-Id", required = false) Long ownerId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) Long tenantId,
             @RequestHeader("X-User-Id") Long userId,
             @RequestBody(required = false) CreateConversationRequest req) {
         if (req == null) {
             req = new CreateConversationRequest();
         }
-        Conversation conv = conversationService.create(tenantId, userId, req);
+        // V5 优先使用 X-Owner-Type + X-Owner-Id，否则兼容 X-Tenant-Id
+        String finalOwnerType = ownerType;
+        Long finalOwnerId = ownerId;
+        if (finalOwnerType == null || finalOwnerId == null) {
+            finalOwnerType = "PERSONAL";
+            finalOwnerId = tenantId;
+        }
+        Conversation conv = conversationService.create(finalOwnerType, finalOwnerId, userId, req);
         return Result.success(conv);
     }
 
@@ -48,11 +59,19 @@ public class ConversationController {
      */
     @GetMapping
     public Result<PageResult<Conversation>> list(
-            @RequestHeader("X-Tenant-Id") Long tenantId,
+            @RequestHeader(value = "X-Owner-Type", required = false) String ownerType,
+            @RequestHeader(value = "X-Owner-Id", required = false) Long ownerId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) Long tenantId,
             @RequestHeader("X-User-Id") Long userId,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
-        PageResult<Conversation> result = conversationService.listByUser(tenantId, userId, page, size);
+        String finalOwnerType = ownerType;
+        Long finalOwnerId = ownerId;
+        if (finalOwnerType == null || finalOwnerId == null) {
+            finalOwnerType = "PERSONAL";
+            finalOwnerId = tenantId;
+        }
+        PageResult<Conversation> result = conversationService.listByUser(finalOwnerType, finalOwnerId, userId, page, size);
         return Result.success(result);
     }
 
@@ -63,9 +82,17 @@ public class ConversationController {
      */
     @GetMapping("/{id}")
     public Result<Conversation> getById(
-            @RequestHeader("X-Tenant-Id") Long tenantId,
+            @RequestHeader(value = "X-Owner-Type", required = false) String ownerType,
+            @RequestHeader(value = "X-Owner-Id", required = false) Long ownerId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) Long tenantId,
             @PathVariable("id") String convId) {
-        Conversation conv = conversationService.getById(tenantId, convId);
+        String finalOwnerType = ownerType;
+        Long finalOwnerId = ownerId;
+        if (finalOwnerType == null || finalOwnerId == null) {
+            finalOwnerType = "PERSONAL";
+            finalOwnerId = tenantId;
+        }
+        Conversation conv = conversationService.getById(finalOwnerType, finalOwnerId, convId);
         return Result.success(conv);
     }
 
@@ -76,10 +103,18 @@ public class ConversationController {
      */
     @DeleteMapping("/{id}")
     public Result<Void> archive(
-            @RequestHeader("X-Tenant-Id") Long tenantId,
+            @RequestHeader(value = "X-Owner-Type", required = false) String ownerType,
+            @RequestHeader(value = "X-Owner-Id", required = false) Long ownerId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) Long tenantId,
             @RequestHeader("X-User-Id") Long userId,
             @PathVariable("id") String convId) {
-        conversationService.archive(tenantId, userId, convId);
+        String finalOwnerType = ownerType;
+        Long finalOwnerId = ownerId;
+        if (finalOwnerType == null || finalOwnerId == null) {
+            finalOwnerType = "PERSONAL";
+            finalOwnerId = tenantId;
+        }
+        conversationService.archive(finalOwnerType, finalOwnerId, userId, convId);
         return Result.success();
     }
 
@@ -90,11 +125,19 @@ public class ConversationController {
      */
     @PutMapping("/{id}/title")
     public Result<Void> updateTitle(
-            @RequestHeader("X-Tenant-Id") Long tenantId,
+            @RequestHeader(value = "X-Owner-Type", required = false) String ownerType,
+            @RequestHeader(value = "X-Owner-Id", required = false) Long ownerId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) Long tenantId,
             @RequestHeader("X-User-Id") Long userId,
             @PathVariable("id") String convId,
             @Valid @RequestBody UpdateTitleRequest req) {
-        conversationService.updateTitle(tenantId, userId, convId, req.getTitle());
+        String finalOwnerType = ownerType;
+        Long finalOwnerId = ownerId;
+        if (finalOwnerType == null || finalOwnerId == null) {
+            finalOwnerType = "PERSONAL";
+            finalOwnerId = tenantId;
+        }
+        conversationService.updateTitle(finalOwnerType, finalOwnerId, userId, convId, req.getTitle());
         return Result.success();
     }
 }

@@ -10,17 +10,30 @@ import java.time.LocalDateTime;
 
 /**
  * 会话实体。
+ *
+ * V5 重构：使用 owner_type + owner_id 替代 tenant_id
+ * - owner_type: PERSONAL 或 ORGANIZATION
+ * - owner_id: 用户ID(PERSONAL) 或 组织ID(ORGANIZATION)
  */
 @Data
 @TableName("conversation")
 public class Conversation implements Serializable {
     private static final long serialVersionUID = 1L;
 
-    /** 会话ID (UUID) */
-    @TableId(type = IdType.INPUT)
-    private String id;
+    /** 自增主键 */
+    @TableId(type = IdType.AUTO)
+    private Long id;
 
-    /** 租户ID，多租户隔离核心字段 */
+    /** 会话ID (UUID) */
+    private String conversationId;
+
+    /** 所有者类型：PERSONAL 或 ORGANIZATION */
+    private String ownerType;
+
+    /** 所有者ID：用户ID(PERSONAL) 或 组织ID(ORGANIZATION) */
+    private Long ownerId;
+
+    /** 兼容旧版 schema 的租户ID，V5 下与 ownerId 保持一致 */
     private Long tenantId;
 
     /** 用户ID */

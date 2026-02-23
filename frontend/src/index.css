@@ -1,0 +1,126 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  @apply bg-dark-950 text-dark-100 h-screen overflow-hidden;
+}
+
+#root {
+  @apply h-full;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-dark-900;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-dark-600 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-dark-500;
+}
+
+/* Custom input styling */
+input, textarea, select {
+  @apply bg-dark-800 border-dark-600 text-dark-100 placeholder-dark-400;
+}
+
+input:focus, textarea:focus, select:focus {
+  @apply border-primary-500 ring-1 ring-primary-500 outline-none;
+}
+
+/* Markdown styling */
+.markdown-content {
+  @apply text-dark-200 leading-relaxed;
+}
+
+.markdown-content h1 {
+  @apply text-2xl font-bold text-dark-50 mt-6 mb-4;
+}
+
+.markdown-content h2 {
+  @apply text-xl font-semibold text-dark-50 mt-5 mb-3;
+}
+
+.markdown-content h3 {
+  @apply text-lg font-medium text-dark-100 mt-4 mb-2;
+}
+
+.markdown-content p {
+  @apply mb-4;
+}
+
+.markdown-content ul, .markdown-content ol {
+  @apply ml-6 mb-4 space-y-1;
+}
+
+.markdown-content ul {
+  @apply list-disc;
+}
+
+.markdown-content ol {
+  @apply list-decimal;
+}
+
+.markdown-content code {
+  @apply bg-dark-800 px-1.5 py-0.5 rounded text-primary-300 text-sm font-mono;
+}
+
+.markdown-content pre {
+  @apply bg-dark-900 p-4 rounded-lg overflow-x-auto mb-4;
+}
+
+.markdown-content pre code {
+  @apply bg-transparent p-0 text-dark-200;
+}
+
+.markdown-content blockquote {
+  @apply border-l-4 border-primary-500 pl-4 italic text-dark-300 my-4;
+}
+
+.markdown-content a {
+  @apply text-primary-400 hover:text-primary-300 underline;
+}
+
+/* Animation for streaming text */
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.cursor-blink::after {
+  content: '|';
+  animation: blink 1s infinite;
+  @apply text-primary-400 ml-0.5;
+}
+
+/* Loading dots */
+.loading-dots span {
+  @apply inline-block w-2 h-2 bg-primary-400 rounded-full mx-0.5;
+  animation: typing 1.4s infinite ease-in-out both;
+}
+
+.loading-dots span:nth-child(1) { animation-delay: -0.32s; }
+.loading-dots span:nth-child(2) { animation-delay: -0.16s; }
+.loading-dots span:nth-child(3) { animation-delay: 0; }
+
+/* Details/Summary chevron rotation for thinking block */
+details[open] .chevron-icon {
+  transform: rotate(180deg);
+}

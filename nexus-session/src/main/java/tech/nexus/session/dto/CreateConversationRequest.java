@@ -8,6 +8,9 @@ import lombok.Data;
 @Data
 public class CreateConversationRequest {
 
+    /** 会话ID（可选，由客户端指定，用于客户端先生成ID的场景） */
+    private String conversationId;
+
     /** 对话标题（可选，默认 "新对话"） */
     private String title;
 

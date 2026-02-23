@@ -27,6 +27,7 @@ class FollowupMessage:
     created_at: float
     injected: bool = False
     injected_at: Optional[float] = None
+    injected_tool: Optional[str] = None  # 注入到哪个工具
 
 
 class FollowupQueue:
@@ -96,7 +97,7 @@ class FollowupQueue:
             logger.error(f"[FollowupQueue] 获取失败: {e}")
             return []
 
-    async def mark_injected(self, conversation_id: str, followup_id: str) -> bool:
+    async def mark_injected(self, conversation_id: str, followup_id: str, tool_name: str = None) -> bool:
         """标记消息已注入"""
         if not self._redis:
             return False
@@ -104,52 +105,56 @@ class FollowupQueue:
         try:
             key = self._key(conversation_id)
             items = await self._redis.lrange(key, 0, -1)
-            
+
             updated = []
             for item in items:
                 msg = FollowupMessage(**json.loads(item))
                 if msg.followup_id == followup_id:
                     msg.injected = True
                     msg.injected_at = time.time()
+                    msg.injected_tool = tool_name
                 updated.append(json.dumps(asdict(msg)))
-            
+
             if updated:
                 await self._redis.delete(key)
                 await self._redis.rpush(key, *updated)
-            
+
             return True
         except Exception as e:
             logger.error(f"[FollowupQueue] 标记失败: {e}")
             return False
 
-    async def mark_all_injected(self, conversation_id: str) -> bool:
-        """标记所有消息已注入"""
+    async def mark_all_injected(self, conversation_id: str, tool_name: str = None) -> list[FollowupMessage]:
+        """标记所有消息已注入，返回被注入的消息列表"""
         if not self._redis:
-            return False
+            return []
 
         try:
             key = self._key(conversation_id)
             items = await self._redis.lrange(key, 0, -1)
-            
+
             if not items:
-                return True
-            
+                return []
+
+            injected_msgs = []
             updated = []
             for item in items:
                 msg = FollowupMessage(**json.loads(item))
                 if not msg.injected:
                     msg.injected = True
                     msg.injected_at = time.time()
+                    msg.injected_tool = tool_name
+                    injected_msgs.append(msg)
                 updated.append(json.dumps(asdict(msg)))
-            
+
             await self._redis.delete(key)
             if updated:
                 await self._redis.rpush(key, *updated)
-            
-            return True
+
+            return injected_msgs
         except Exception as e:
             logger.error(f"[FollowupQueue] 批量标记失败: {e}")
-            return False
+            return []
 
     async def clear(self, conversation_id: str) -> bool:
         """清空队列"""
