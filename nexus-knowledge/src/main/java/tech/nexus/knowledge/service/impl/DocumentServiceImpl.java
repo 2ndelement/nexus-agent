@@ -166,7 +166,7 @@ public class DocumentServiceImpl implements DocumentService {
 
             // 异步通知 embed-worker 向量化（失败不影响主流程）
             embedTaskPublisher.publishEmbedTask(
-                    tenantId, kbId, doc.getId(), chunkEntities, safeName);
+                    tenantId, kbId, doc.getId(), chunkEntities, originalName);
 
         } catch (Exception e) {
             markFailed(doc.getId(), e.getMessage());

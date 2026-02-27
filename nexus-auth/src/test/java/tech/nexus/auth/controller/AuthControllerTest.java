@@ -69,7 +69,6 @@ class AuthControllerTest {
         when(authService.register(any())).thenReturn(mockToken());
 
         RegisterRequest req = new RegisterRequest();
-        req.setTenantId(1L);
         req.setUsername("alice");
         req.setPassword("password123");
         req.setEmail("alice@example.com");
@@ -90,7 +89,6 @@ class AuthControllerTest {
                 .thenThrow(new BizException(ResultCode.PARAM_ERROR, "用户名已存在"));
 
         RegisterRequest req = new RegisterRequest();
-        req.setTenantId(1L);
         req.setUsername("bob");
         req.setPassword("password123");
 
@@ -105,8 +103,8 @@ class AuthControllerTest {
     @Test
     @DisplayName("POST /register 缺少必填字段 → 400 参数校验错误")
     void register_missing_fields_returns_400() throws Exception {
-        // 只提供 tenantId，username 和 password 缺失
-        String json = "{\"tenantId\":1}";
+        // username 和 password 缺失
+        String json = "{}";
 
         mockMvc.perform(post(BASE_URL + "/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -123,7 +121,6 @@ class AuthControllerTest {
         when(authService.login(any())).thenReturn(mockToken());
 
         LoginRequest req = new LoginRequest();
-        req.setTenantId(1L);
         req.setUsername("alice");
         req.setPassword("password123");
 
@@ -142,7 +139,6 @@ class AuthControllerTest {
                 .thenThrow(new BizException(ResultCode.UNAUTHORIZED, "用户名或密码错误"));
 
         LoginRequest req = new LoginRequest();
-        req.setTenantId(1L);
         req.setUsername("alice");
         req.setPassword("wrongpass");
 
@@ -222,7 +218,6 @@ class AuthControllerTest {
     void me_success() throws Exception {
         UserInfoResponse info = UserInfoResponse.builder()
                 .userId(1L)
-                .tenantId(1L)
                 .username("alice")
                 .email("alice@example.com")
                 .roles(List.of("USER"))
@@ -233,8 +228,7 @@ class AuthControllerTest {
                         .header("Authorization", "Bearer valid.token"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.username").value("alice"))
-                .andExpect(jsonPath("$.data.tenantId").value(1));
+                .andExpect(jsonPath("$.data.username").value("alice"));
     }
 
     @Test

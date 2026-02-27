@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tech.nexus.auth.mapper.OrganizationMapper">
+
+    <select id="findByCode" resultType="tech.nexus.auth.entity.Organization">
+        SELECT *
+        FROM organization
+        WHERE code = #{code}
+        LIMIT 1
+    </select>
+
+    <select id="countByOwnerId" resultType="int">
+        SELECT COUNT(*)
+        FROM organization
+        WHERE owner_id = #{ownerId}
+          AND status = 1
+    </select>
+
+</mapper>

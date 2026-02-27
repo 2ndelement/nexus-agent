@@ -5,8 +5,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import tech.nexus.platform.adapter.qq.config.QQBotProperties;
 import tech.nexus.platform.common.model.PlatformMessage;
 import tech.nexus.platform.common.mq.PlatformMessagePublisher;
+import tech.nexus.session.service.PlatformUserService;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -31,6 +33,8 @@ public class QQEventHandler {
 
     private final ObjectMapper objectMapper;
     private final PlatformMessagePublisher messagePublisher;
+    private final QQBotProperties qqBotProperties;
+    private final PlatformUserService platformUserService;
 
     /**
      * 处理 QQ 事件（由 QQGatewayClient 调用）
@@ -65,7 +69,11 @@ public class QQEventHandler {
         String authorId = data.path("author").path("id").asText();
         String authorName = data.path("author").path("username").asText();
 
-        PlatformMessage message = PlatformMessage.builder()
+        // 解析平台用户
+        PlatformUserService.PlatformUserResult result = platformUserService.resolveUser(
+                platformType.name(), qqBotProperties.getAppId(), authorId);
+
+        PlatformMessage.PlatformMessageBuilder builder = PlatformMessage.builder()
                 .messageId(messageId)
                 .platform(platformType)
                 .messageType(PlatformMessage.MessageType.AT)
@@ -75,9 +83,21 @@ public class QQEventHandler {
                 .chatId(channelId)
                 .content(content)
                 .rawPayload(data.toString())
-                .receivedAt(LocalDateTime.now())
-                .build();
+                .receivedAt(LocalDateTime.now());
 
+        if (result.success) {
+            builder.puid(authorId)
+                    .botId(result.getBot().getId())
+                    .tenantId(result.getBot().getOwnerId() != null ?
+                            result.getBot().getOwnerId().toString() : null);
+        } else if (result.bot != null) {
+            // Bot 存在但用户未绑定
+            builder.puid(authorId)
+                    .botId(result.getBot().getId());
+            log.info("[QQEvent] 用户未绑定 Bot: authorId={}, botId={}", authorId, result.getBot().getId());
+        }
+
+        PlatformMessage message = builder.build();
         messagePublisher.publishInboundMessage(message);
         log.info("[QQEvent] AT消息已处理: channelId={}, authorId={}, content={}",
                 channelId, authorId, content);
@@ -93,7 +113,11 @@ public class QQEventHandler {
         String authorId = data.path("author").path("id").asText();
         String authorName = data.path("author").path("username").asText();
 
-        PlatformMessage message = PlatformMessage.builder()
+        // 解析平台用户
+        PlatformUserService.PlatformUserResult result = platformUserService.resolveUser(
+                "QQ_GUILD_DM", qqBotProperties.getAppId(), authorId);
+
+        PlatformMessage.PlatformMessageBuilder builder = PlatformMessage.builder()
                 .messageId(messageId)
                 .platform(PlatformMessage.PlatformType.QQ_GUILD_DM)
                 .messageType(PlatformMessage.MessageType.TEXT)
@@ -103,9 +127,20 @@ public class QQEventHandler {
                 .chatId(guildId)
                 .content(content)
                 .rawPayload(data.toString())
-                .receivedAt(LocalDateTime.now())
-                .build();
+                .receivedAt(LocalDateTime.now());
 
+        if (result.success) {
+            builder.puid(authorId)
+                    .botId(result.getBot().getId())
+                    .tenantId(result.getBot().getOwnerId() != null ?
+                            result.getBot().getOwnerId().toString() : null);
+        } else if (result.bot != null) {
+            builder.puid(authorId)
+                    .botId(result.getBot().getId());
+            log.info("[QQEvent] 用户未绑定 Bot: authorId={}, botId={}", authorId, result.getBot().getId());
+        }
+
+        PlatformMessage message = builder.build();
         messagePublisher.publishInboundMessage(message);
         log.info("[QQEvent] 频道私信已处理: guildId={}, authorId={}", guildId, authorId);
     }
@@ -119,7 +154,11 @@ public class QQEventHandler {
         String groupOpenId = data.path("group_openid").asText();
         String authorOpenId = data.path("author").path("member_openid").asText();
 
-        PlatformMessage message = PlatformMessage.builder()
+        // 解析平台用户
+        PlatformUserService.PlatformUserResult result = platformUserService.resolveUser(
+                "QQ_GROUP", qqBotProperties.getAppId(), authorOpenId);
+
+        PlatformMessage.PlatformMessageBuilder builder = PlatformMessage.builder()
                 .messageId(messageId)
                 .platform(PlatformMessage.PlatformType.QQ_GROUP)
                 .messageType(PlatformMessage.MessageType.AT)
@@ -128,9 +167,20 @@ public class QQEventHandler {
                 .chatId(groupOpenId)
                 .content(content)
                 .rawPayload(data.toString())
-                .receivedAt(LocalDateTime.now())
-                .build();
+                .receivedAt(LocalDateTime.now());
 
+        if (result.success) {
+            builder.puid(authorOpenId)
+                    .botId(result.getBot().getId())
+                    .tenantId(result.getBot().getOwnerId() != null ?
+                            result.getBot().getOwnerId().toString() : null);
+        } else if (result.bot != null) {
+            builder.puid(authorOpenId)
+                    .botId(result.getBot().getId());
+            log.info("[QQEvent] 用户未绑定 Bot: authorOpenId={}, botId={}", authorOpenId, result.getBot().getId());
+        }
+
+        PlatformMessage message = builder.build();
         messagePublisher.publishInboundMessage(message);
         log.info("[QQEvent] 群聊AT消息已处理: groupOpenId={}, authorOpenId={}",
                 groupOpenId, authorOpenId);
@@ -144,7 +194,11 @@ public class QQEventHandler {
         String content = data.path("content").asText("").trim();
         String userOpenId = data.path("author").path("user_openid").asText();
 
-        PlatformMessage message = PlatformMessage.builder()
+        // 解析平台用户
+        PlatformUserService.PlatformUserResult result = platformUserService.resolveUser(
+                "QQ", qqBotProperties.getAppId(), userOpenId);
+
+        PlatformMessage.PlatformMessageBuilder builder = PlatformMessage.builder()
                 .messageId(messageId)
                 .platform(PlatformMessage.PlatformType.QQ)
                 .messageType(PlatformMessage.MessageType.TEXT)
@@ -153,9 +207,20 @@ public class QQEventHandler {
                 .chatId(userOpenId)
                 .content(content)
                 .rawPayload(data.toString())
-                .receivedAt(LocalDateTime.now())
-                .build();
+                .receivedAt(LocalDateTime.now());
 
+        if (result.success) {
+            builder.puid(userOpenId)
+                    .botId(result.getBot().getId())
+                    .tenantId(result.getBot().getOwnerId() != null ?
+                            result.getBot().getOwnerId().toString() : null);
+        } else if (result.bot != null) {
+            builder.puid(userOpenId)
+                    .botId(result.getBot().getId());
+            log.info("[QQEvent] 用户未绑定 Bot: userOpenId={}, botId={}", userOpenId, result.getBot().getId());
+        }
+
+        PlatformMessage message = builder.build();
         messagePublisher.publishInboundMessage(message);
         log.info("[QQEvent] 单聊消息已处理: userOpenId={}", userOpenId);
     }

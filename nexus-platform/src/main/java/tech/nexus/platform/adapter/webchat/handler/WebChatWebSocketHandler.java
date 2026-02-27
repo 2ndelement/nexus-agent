@@ -191,15 +191,18 @@ public class WebChatWebSocketHandler extends TextWebSocketHandler {
         String messageId = UUID.randomUUID().toString();
 
         // 构建统一消息格式
+        // WebChat 轻量集成：使用默认 Web Bot (id=1)
         PlatformMessage message = PlatformMessage.builder()
                 .messageId(messageId)
-                .platform(PlatformMessage.PlatformType.WEBCHAT)
+                .platform(PlatformMessage.PlatformType.WEB)
                 .messageType(PlatformMessage.MessageType.TEXT)
                 .chatType(PlatformMessage.ChatType.PRIVATE)
                 .senderId(userId)
                 .chatId(chatId)
                 .content(content)
                 .tenantId(tenantId)
+                .botId(1L)  // 默认 Web Bot
+                .puid(userId)  // Web 用户直接使用 userId 作为平台身份
                 .rawPayload(node.toString())
                 .receivedAt(LocalDateTime.now())
                 .build();

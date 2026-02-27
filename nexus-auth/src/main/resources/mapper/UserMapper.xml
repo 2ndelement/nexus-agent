@@ -3,12 +3,27 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="tech.nexus.auth.mapper.UserMapper">
     <!-- MyBatis-Plus 自动生成通用 CRUD，此处仅添加自定义查询 -->
+    <!-- V5 重构：移除 tenantId 相关查询，改为全局用户名/邮箱查询 -->
 
-    <select id="findByTenantIdAndUsername" resultType="tech.nexus.auth.entity.User">
+    <select id="findByUsername" resultType="tech.nexus.auth.entity.User">
         SELECT *
         FROM `user`
-        WHERE tenant_id = #{tenantId}
-          AND username = #{username}
+        WHERE username = #{username}
+        LIMIT 1
+    </select>
+
+    <select id="findByEmail" resultType="tech.nexus.auth.entity.User">
+        SELECT *
+        FROM `user`
+        WHERE email = #{email}
+        LIMIT 1
+    </select>
+
+    <select id="findByUsernameOrEmail" resultType="tech.nexus.auth.entity.User">
+        SELECT *
+        FROM `user`
+        WHERE username = #{usernameOrEmail}
+           OR email = #{usernameOrEmail}
         LIMIT 1
     </select>
 

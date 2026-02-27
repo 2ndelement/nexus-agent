@@ -28,6 +28,14 @@ spring:
       max-file-size: 50MB
       max-request-size: 50MB
 
+  # RabbitMQ (通知 embed-worker 执行向量化)
+  rabbitmq:
+    host: ${RABBITMQ_HOST:127.0.0.1}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    virtual-host: ${RABBITMQ_VHOST:/}
+
 mybatis-plus:
   mapper-locations: classpath:mapper/*.xml
   type-aliases-package: tech.nexus.knowledge.entity
@@ -40,22 +48,10 @@ mybatis-plus:
 
 nexus:
   knowledge:
-    upload-dir: /AstrBot/data/workspace/nexus-agent/data/uploads
+    upload-dir: ${NEXUS_UPLOAD_DIR:/AstrBot/data/workspace/nexus-agent/data/uploads}
+    embed-queue: nexus.embed.tasks
 
 logging:
   level:
     tech.nexus: DEBUG
     com.baomidou.mybatisplus: WARN
-
-  # RabbitMQ (通知 embed-worker 执行向量化)
-  rabbitmq:
-    host: ${RABBITMQ_HOST:127.0.0.1}
-    port: ${RABBITMQ_PORT:5672}
-    username: ${RABBITMQ_USERNAME:guest}
-    password: ${RABBITMQ_PASSWORD:guest}
-    virtual-host: ${RABBITMQ_VHOST:/}
-
-nexus:
-  knowledge:
-    upload-dir: ${NEXUS_UPLOAD_DIR:/data/uploads}
-    embed-queue: nexus.embed.tasks

@@ -47,14 +47,7 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-    
-        <!-- Redis: 黑名单校验已登出 Token -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-redis</artifactId>
-        </dependency>
-
-    </dependencies>
+        </dependencies>
     </dependencyManagement>
 
     <dependencies>

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="tech.nexus.auth.mapper.OrganizationUserMapper">
+
+    <select id="findOrganizationsByUserId" resultType="tech.nexus.auth.dto.TokenResponse$OrganizationWithRole">
+        SELECT
+            o.id,
+            o.code,
+            o.name,
+            o.avatar,
+            ou.role
+        FROM organization_user ou
+        INNER JOIN organization o ON o.id = ou.organization_id
+        WHERE ou.user_id = #{userId}
+          AND ou.status = 1
+          AND o.status = 1
+        ORDER BY ou.joined_at ASC
+    </select>
+
+    <select id="countByUserId" resultType="int">
+        SELECT COUNT(*)
+        FROM organization_user
+        WHERE user_id = #{userId}
+          AND status = 1
+    </select>
+
+    <select id="findByOrgAndUser" resultType="tech.nexus.auth.entity.OrganizationUser">
+        SELECT *
+        FROM organization_user
+        WHERE organization_id = #{organizationId}
+          AND user_id = #{userId}
+        LIMIT 1
+    </select>
+
+</mapper>

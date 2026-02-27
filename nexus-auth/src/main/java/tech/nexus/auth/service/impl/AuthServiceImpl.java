@@ -12,8 +12,11 @@ import org.springframework.transaction.annotation.Transactional;
 import tech.nexus.auth.dto.LoginRequest;
 import tech.nexus.auth.dto.RegisterRequest;
 import tech.nexus.auth.dto.TokenResponse;
+import tech.nexus.auth.dto.TokenResponse.OrganizationWithRole;
+import tech.nexus.auth.dto.TokenResponse.UserInfo;
 import tech.nexus.auth.dto.UserInfoResponse;
 import tech.nexus.auth.entity.User;
+import tech.nexus.auth.mapper.OrganizationUserMapper;
 import tech.nexus.auth.mapper.UserMapper;
 import tech.nexus.auth.service.AuthService;
 import tech.nexus.common.exception.BizException;
@@ -31,8 +34,10 @@ import java.util.concurrent.TimeUnit;
 /**
  * 认证服务实现。
  *
+ * <p>V5 重构：移除 tenantId 绑定，用户独立注册/登录。
+ *
  * <p>Access Token 内嵌 {@code jti}（UUID），用于登出后加入 Redis 黑名单。
- * Refresh Token 存入 Redis，key = {@code nexus:{tenantId}:refresh:{userId}}。
+ * Refresh Token 存入 Redis，key = {@code nexus:refresh:{userId}}。
  * 黑名单 key = {@code nexus:blacklist:{jti}}。
  */
 @Slf4j
@@ -40,10 +45,11 @@ import java.util.concurrent.TimeUnit;
 public class AuthServiceImpl implements AuthService {
 
     private final UserMapper userMapper;
-    private final JwtUtils jwtUtils;           // 用于解析 token（验签）
+    private final OrganizationUserMapper organizationUserMapper;
+    private final JwtUtils jwtUtils;
     private final StringRedisTemplate redisTemplate;
     private final BCryptPasswordEncoder passwordEncoder;
-    private final SecretKey secretKey;         // 用于签发带 jti 的 access token
+    private final SecretKey secretKey;
 
     @Value("${nexus.jwt.access-token-expiration-ms:7200000}")
     private long accessTokenExpirationMs;
@@ -53,11 +59,13 @@ public class AuthServiceImpl implements AuthService {
 
     public AuthServiceImpl(
             UserMapper userMapper,
+            OrganizationUserMapper organizationUserMapper,
             JwtUtils jwtUtils,
             StringRedisTemplate redisTemplate,
             BCryptPasswordEncoder passwordEncoder,
             @Value("${nexus.jwt.secret}") String jwtSecret) {
         this.userMapper = userMapper;
+        this.organizationUserMapper = organizationUserMapper;
         this.jwtUtils = jwtUtils;
         this.redisTemplate = redisTemplate;
         this.passwordEncoder = passwordEncoder;
@@ -66,9 +74,9 @@ public class AuthServiceImpl implements AuthService {
 
     // ── Redis Key ────────────────────────────────────────────
 
-    /** nexus:{tenantId}:refresh:{userId} */
-    private String refreshKey(Long tenantId, Long userId) {
-        return "nexus:" + tenantId + ":refresh:" + userId;
+    /** nexus:refresh:{userId} */
+    private String refreshKey(Long userId) {
+        return "nexus:refresh:" + userId;
     }
 
     /** nexus:blacklist:{jti} */
@@ -81,23 +89,33 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public TokenResponse register(RegisterRequest request) {
-        User existing = userMapper.findByTenantIdAndUsername(
-                request.getTenantId(), request.getUsername());
-        if (existing != null) {
+        // 检查用户名是否已存在
+        User existingByUsername = userMapper.findByUsername(request.getUsername());
+        if (existingByUsername != null) {
             throw new BizException(ResultCode.PARAM_ERROR, "用户名已存在");
         }
 
+        // 检查邮箱是否已存在（如果提供了邮箱）
+        if (request.getEmail() != null && !request.getEmail().isBlank()) {
+            User existingByEmail = userMapper.findByEmail(request.getEmail());
+            if (existingByEmail != null) {
+                throw new BizException(ResultCode.PARAM_ERROR, "邮箱已被使用");
+            }
+        }
+
         User user = new User()
-                .setTenantId(request.getTenantId())
                 .setUsername(request.getUsername())
                 .setEmail(request.getEmail())
+                .setNickname(request.getNickname())
                 .setPassword(passwordEncoder.encode(request.getPassword()))
                 .setRoles("USER")
-                .setStatus(1);
+                .setStatus(1)
+                .setPersonalAgentLimit(1)  // 默认配额
+                .setOrgCreateLimit(3)
+                .setOrgJoinLimit(10);
 
         userMapper.insert(user);
-        log.info("注册成功: tenantId={}, username={}, userId={}",
-                request.getTenantId(), request.getUsername(), user.getId());
+        log.info("注册成功: username={}, userId={}", request.getUsername(), user.getId());
 
         return buildTokenResponse(user);
     }
@@ -106,8 +124,8 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public TokenResponse login(LoginRequest request) {
-        User user = userMapper.findByTenantIdAndUsername(
-                request.getTenantId(), request.getUsername());
+        // 支持用户名或邮箱登录
+        User user = userMapper.findByUsernameOrEmail(request.getUsername());
 
         // 统一错误：不区分"用户不存在"和"密码错误"，避免信息泄露
         if (user == null || !passwordEncoder.matches(request.getPassword(), user.getPassword())) {
@@ -133,15 +151,14 @@ public class AuthServiceImpl implements AuthService {
         }
 
         String userId = claims.get(JwtUtils.CLAIM_USER_ID, String.class);
-        String tenantId = claims.get(JwtUtils.CLAIM_TENANT_ID, String.class);
 
-        if (userId == null || tenantId == null) {
+        if (userId == null) {
             throw new BizException(ResultCode.TOKEN_INVALID);
         }
 
         // 验证 Redis 中存储的 Refresh Token 是否一致（防止重放）
         String storedToken = redisTemplate.opsForValue()
-                .get(refreshKey(Long.valueOf(tenantId), Long.valueOf(userId)));
+                .get(refreshKey(Long.valueOf(userId)));
         if (!refreshToken.equals(storedToken)) {
             throw new BizException(ResultCode.TOKEN_INVALID, "Refresh Token 已失效或已被替换");
         }
@@ -181,9 +198,8 @@ public class AuthServiceImpl implements AuthService {
 
         // 删除对应 Refresh Token
         String userId = claims.get(JwtUtils.CLAIM_USER_ID, String.class);
-        String tenantId = claims.get(JwtUtils.CLAIM_TENANT_ID, String.class);
-        if (userId != null && tenantId != null) {
-            redisTemplate.delete(refreshKey(Long.valueOf(tenantId), Long.valueOf(userId)));
+        if (userId != null) {
+            redisTemplate.delete(refreshKey(Long.valueOf(userId)));
         }
     }
 
@@ -210,12 +226,20 @@ public class AuthServiceImpl implements AuthService {
             throw new BizException(ResultCode.USER_NOT_FOUND);
         }
 
+        // 获取用户加入的组织列表
+        List<OrganizationWithRole> organizations = organizationUserMapper.findOrganizationsByUserId(user.getId());
+
         return UserInfoResponse.builder()
                 .userId(user.getId())
-                .tenantId(user.getTenantId())
                 .username(user.getUsername())
                 .email(user.getEmail())
+                .nickname(user.getNickname())
+                .avatar(user.getAvatar())
                 .roles(parseRoles(user.getRoles()))
+                .personalAgentLimit(user.getPersonalAgentLimit())
+                .orgCreateLimit(user.getOrgCreateLimit())
+                .orgJoinLimit(user.getOrgJoinLimit())
+                .organizations(organizations)
                 .build();
     }
 
@@ -228,36 +252,52 @@ public class AuthServiceImpl implements AuthService {
     private TokenResponse buildTokenResponse(User user) {
         List<String> roleList = parseRoles(user.getRoles());
         String userId = String.valueOf(user.getId());
-        String tenantId = String.valueOf(user.getTenantId());
         String jti = UUID.randomUUID().toString();
 
         // 签发带 jti 的 Access Token
-        String accessToken = buildJwtWithJti(userId, tenantId, roleList, jti, accessTokenExpirationMs);
+        String accessToken = buildJwtWithJti(userId, roleList, jti, accessTokenExpirationMs);
 
         // Refresh Token（同样带 jti）
         String refreshJti = UUID.randomUUID().toString();
-        String refreshToken = buildJwtWithJti(userId, tenantId, roleList, refreshJti, refreshTokenExpirationMs);
+        String refreshToken = buildJwtWithJti(userId, roleList, refreshJti, refreshTokenExpirationMs);
 
         // 写入 Redis
         redisTemplate.opsForValue().set(
-                refreshKey(user.getTenantId(), user.getId()),
+                refreshKey(user.getId()),
                 refreshToken,
                 refreshTokenExpirationMs,
                 TimeUnit.MILLISECONDS);
+
+        // 获取用户加入的组织列表
+        List<OrganizationWithRole> organizations = organizationUserMapper.findOrganizationsByUserId(user.getId());
+
+        // 构建用户信息
+        UserInfo userInfo = UserInfo.builder()
+                .id(user.getId())
+                .username(user.getUsername())
+                .email(user.getEmail())
+                .nickname(user.getNickname())
+                .avatar(user.getAvatar())
+                .personalAgentLimit(user.getPersonalAgentLimit())
+                .orgCreateLimit(user.getOrgCreateLimit())
+                .orgJoinLimit(user.getOrgJoinLimit())
+                .build();
 
         return TokenResponse.builder()
                 .accessToken(accessToken)
                 .refreshToken(refreshToken)
                 .expiresIn(accessTokenExpirationMs / 1000)
                 .tokenType("Bearer")
+                .user(userInfo)
+                .organizations(organizations)
                 .build();
     }
 
     /**
-     * 使用 jjwt API 构建带 jti 的 JWT（与 JwtUtils 共用同一密钥，因此 JwtUtils 可解析）。
+     * 使用 jjwt API 构建带 jti 的 JWT。
+     * V5 重构：移除 tenantId claim。
      */
-    private String buildJwtWithJti(String userId, String tenantId,
-                                    List<String> roles, String jti, long expirationMs) {
+    private String buildJwtWithJti(String userId, List<String> roles, String jti, long expirationMs) {
         Date now = new Date();
         Date expiry = new Date(now.getTime() + expirationMs);
 
@@ -265,7 +305,6 @@ public class AuthServiceImpl implements AuthService {
                 .id(jti)
                 .subject(userId)
                 .claim(JwtUtils.CLAIM_USER_ID, userId)
-                .claim(JwtUtils.CLAIM_TENANT_ID, tenantId)
                 .claim(JwtUtils.CLAIM_ROLES, roles)
                 .issuedAt(now)
                 .expiration(expiry)

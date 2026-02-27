@@ -69,6 +69,16 @@ public class PlatformMessage {
     private String tenantId;
 
     /**
+     * Bot ID（接收消息的 Bot）
+     */
+    private Long botId;
+
+    /**
+     * 平台用户 ID（puid）
+     */
+    private String puid;
+
+    /**
      * 消息接收时间
      */
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
@@ -78,11 +88,14 @@ public class PlatformMessage {
      * 平台类型枚举
      */
     public enum PlatformType {
-        WEBCHAT,    // Web 网页聊天
+        WEB,        // Web 网页聊天（默认）
         QQ,         // QQ 单聊
         QQ_GROUP,   // QQ 群聊
         QQ_GUILD,   // QQ 频道
-        QQ_GUILD_DM // QQ 频道私信
+        QQ_GUILD_DM,// QQ 频道私信
+        FEISHU,     // 飞书
+        WECHAT,     // 微信
+        TELEGRAM    // Telegram
     }
 
     /**

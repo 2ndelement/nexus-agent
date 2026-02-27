@@ -19,6 +19,8 @@ import java.util.Objects;
  * 调用方通常在 Spring 配置类中将本实例声明为 Bean，
  * 密钥值从 {@code application.yml} 的 {@code nexus.jwt.secret} 读取。
  *
+ * <p>V5 重构：移除强制的 tenantId 参数，保留向后兼容的重载方法。
+ *
  * <pre>{@code
  * @Bean
  * public JwtUtils jwtUtils(
@@ -33,7 +35,8 @@ public final class JwtUtils {
     /** Claims key：用户 ID */
     public static final String CLAIM_USER_ID = "userId";
 
-    /** Claims key：租户 ID */
+    /** Claims key：租户 ID（已废弃，保留向后兼容） */
+    @Deprecated
     public static final String CLAIM_TENANT_ID = "tenantId";
 
     /** Claims key：角色列表 */
@@ -56,16 +59,14 @@ public final class JwtUtils {
     }
 
     /**
-     * 生成 JWT Token。
+     * 生成 JWT Token（V5 新接口，不包含 tenantId）。
      *
-     * @param userId   用户 ID
-     * @param tenantId 租户 ID
-     * @param roles    角色列表
+     * @param userId 用户 ID
+     * @param roles  角色列表
      * @return 签名后的 JWT 字符串
      */
-    public String generateToken(String userId, String tenantId, List<String> roles) {
+    public String generateToken(String userId, List<String> roles) {
         Objects.requireNonNull(userId, "userId must not be null");
-        Objects.requireNonNull(tenantId, "tenantId must not be null");
 
         Date now = new Date();
         Date expiry = new Date(now.getTime() + expirationMs);
@@ -73,12 +74,42 @@ public final class JwtUtils {
         return Jwts.builder()
                 .subject(userId)
                 .claim(CLAIM_USER_ID, userId)
-                .claim(CLAIM_TENANT_ID, tenantId)
                 .claim(CLAIM_ROLES, roles)
                 .issuedAt(now)
                 .expiration(expiry)
                 .signWith(secretKey)
                 .compact();
+    }
+
+    /**
+     * 生成 JWT Token（旧接口，包含 tenantId，向后兼容）。
+     *
+     * @param userId   用户 ID
+     * @param tenantId 租户 ID（已废弃，可传 null）
+     * @param roles    角色列表
+     * @return 签名后的 JWT 字符串
+     * @deprecated 使用 {@link #generateToken(String, List)} 替代
+     */
+    @Deprecated
+    public String generateToken(String userId, String tenantId, List<String> roles) {
+        Objects.requireNonNull(userId, "userId must not be null");
+
+        Date now = new Date();
+        Date expiry = new Date(now.getTime() + expirationMs);
+
+        var builder = Jwts.builder()
+                .subject(userId)
+                .claim(CLAIM_USER_ID, userId)
+                .claim(CLAIM_ROLES, roles)
+                .issuedAt(now)
+                .expiration(expiry);
+
+        // 向后兼容：如果传入 tenantId，仍然写入 claim
+        if (tenantId != null) {
+            builder.claim(CLAIM_TENANT_ID, tenantId);
+        }
+
+        return builder.signWith(secretKey).compact();
     }
 
     /**
