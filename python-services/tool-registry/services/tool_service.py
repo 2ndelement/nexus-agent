@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-from builtin_tools import calculator, web_search, sandbox
+from builtin_tools import calculator, web_search, sandbox, knowledge_search
 from models import (
     ApiResponse,
     ExecuteToolRequest,
@@ -63,12 +63,14 @@ _BUILTIN_EXECUTORS: Dict[str, Any] = {
     "calculator": calculator.calculate,
     "sandbox_execute": sandbox.execute_code,
     "web_search": web_search.web_search,
+    "knowledge_search": knowledge_search.execute,
 }
 
 _BUILTIN_DEFINITIONS = [
     calculator.TOOL_DEFINITION,
     sandbox.TOOL_DEFINITION,
     web_search.TOOL_DEFINITION,
+    knowledge_search.TOOL_DEFINITION,
 ]
 
 

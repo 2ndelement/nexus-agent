@@ -153,49 +153,6 @@ class MockEmbedder(BaseEmbedder):
         return self._dim
 
 
-# ═══════════════════════════════════════════════════════════════════ 远程 Embed Service ═══════════════════════════════════════════════════════════════════
-
-class RemoteEmbedder(BaseEmbedder):
-    """
-    远程 Embed Service 客户端
-
-    调用独立的 embed-service 进行向量化，
-    实现 GPU 资源隔离和水平扩展。
-    """
-
-    def __init__(self, service_url: str = "http://127.0.0.1:8004"):
-        self._service_url = service_url.rstrip("/")
-        self._dim = 768  # 默认值，会在首次调用时更新
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        import httpx
-        response = httpx.post(
-            f"{self._service_url}/api/v1/embed/documents",
-            json={"texts": texts},
-            timeout=120.0,
-        )
-        response.raise_for_status()
-        data = response.json()
-        self._dim = data.get("dim", self._dim)
-        return data["embeddings"]
-
-    def embed_query(self, text: str) -> list[float]:
-        import httpx
-        response = httpx.post(
-            f"{self._service_url}/api/v1/embed/query",
-            json={"text": text},
-            timeout=30.0,
-        )
-        response.raise_for_status()
-        data = response.json()
-        self._dim = data.get("dim", self._dim)
-        return data["embedding"]
-
-    @property
-    def dim(self) -> int:
-        return self._dim
-
-
 # ═══════════════════════════════════════════════════════════════════ 全局单例管理 ═══════════════════════════════════════════════════════════════════
 
 _embedder_instance: BaseEmbedder | None = None
@@ -208,14 +165,8 @@ def get_embedder() -> BaseEmbedder:
     if _embedder_instance is None:
         with _embedder_lock:
             if _embedder_instance is None:
-                from app.config import settings
-                # 根据配置选择本地或远程 Embedder
-                if settings.use_embed_service:
-                    logger.info(f"使用远程 Embed Service: {settings.embed_service_url}")
-                    _embedder_instance = RemoteEmbedder(settings.embed_service_url)
-                else:
-                    logger.info(f"使用本地 Embedding 模型: {settings.embedding_model}")
-                    _embedder_instance = BGEEmbedder(settings.embedding_model)
+                from app.rag_config import settings
+                _embedder_instance = BGEEmbedder(settings.embedding_model)
     return _embedder_instance
 
 

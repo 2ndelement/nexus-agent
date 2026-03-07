@@ -10,8 +10,9 @@ class Settings(BaseSettings):
     port: int = 8020
 
     # Docker 配置
-    docker_image: str = "python:3.11-slim"
-    container_pool_size: int = 4          # 容器池大小
+    docker_image: str = "nexus-sandbox:full"  # 使用完整版镜像（包含 numpy, pandas, matplotlib 等）
+    container_pool_size: int = 4          # 容器池大小（预热容器数量）
+    container_pool_enabled: bool = True   # 是否启用容器池
     container_max_memory: str = "256m"    # 最大内存
     container_cpu_limit: float = 0.5      # CPU 限制（0.5 核）
     default_timeout: int = 30             # 默认超时秒数

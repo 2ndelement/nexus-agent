@@ -22,7 +22,7 @@ import pika
 from pika.adapters.blocking_connection import BlockingChannel
 from pika.exceptions import AMQPConnectionError
 
-from app.agent.graph import build_graph, invoke_agent
+from app.agent.graph import build_graph, invoke_agent_with_media
 from app.checkpointer import get_mysql_checkpointer
 from app.mq.config import mq_settings
 from app.schemas import ChatResponse
@@ -132,28 +132,52 @@ class InboundMessageConsumer:
 
             # 提取必要字段
             platform = message_data.get("platform")
+            bot_id = message_data.get("botId")
+            puid = message_data.get("puid")
             chat_id = message_data.get("chatId")
             sender_id = message_data.get("senderId")
             tenant_id = message_data.get("tenantId", "default")
             user_content = message_data.get("content", "")
+            # resolvedUserId: 从 BotBinding 解析出的实际 user_id（由 Java 平台适配器设置）
+            resolved_user_id = message_data.get("resolvedUserId")
+            # owner_type 和 owner_id: 标识会话归属空间
+            owner_type = message_data.get("ownerType", "PERSONAL")
+            owner_id = message_data.get("ownerId", resolved_user_id or tenant_id)
 
             if not user_content:
                 logger.warn("[MQ] 消息内容为空，跳过处理")
                 ch.basic_ack(delivery_tag=method.delivery_tag)
                 return
 
-            # 异步调用 Agent
-            response = asyncio.run(
-                self._invoke_agent_async(tenant_id, sender_id, chat_id, user_content)
+            # 确定最终的用户 ID（优先使用 resolvedUserId，否则用 tenantId）
+            final_user_id = resolved_user_id or tenant_id
+
+            logger.info(
+                "[MQ] 处理消息: platform=%s, botId=%s, owner_type=%s, owner_id=%s, user_id=%s, conv=%s",
+                platform, bot_id, owner_type, owner_id, final_user_id, chat_id
             )
 
-            # 构建出站消息
+            # 异步调用 Agent（使用新签名）
+            result = asyncio.run(
+                self._invoke_agent_async(
+                    owner_type=owner_type,
+                    owner_id=owner_id,
+                    user_id=final_user_id,
+                    conversation_id=chat_id,
+                    message=user_content,
+                    platform=platform,
+                    bot_id=str(bot_id) if bot_id else None,
+                )
+            )
+
+            # 构建出站消息（支持多媒体）
             outbound_message = {
                 "messageId": f"{message_id}_response",
                 "platform": platform,
                 "chatId": chat_id,
                 "senderId": sender_id,
-                "content": response,
+                "content": result["text"],
+                "mediaEvents": result["media_events"],
                 "tenantId": tenant_id,
             }
 
@@ -183,22 +207,31 @@ class InboundMessageConsumer:
 
     async def _invoke_agent_async(
         self,
-        tenant_id: str,
+        owner_type: str,
+        owner_id: str,
         user_id: str,
         conversation_id: str,
         message: str,
-    ) -> str:
-        """异步调用 Agent"""
+        platform: str,
+        bot_id: str,
+    ) -> dict:
+        """异步调用 Agent，返回文本和媒体事件"""
         async with get_mysql_checkpointer() as checkpointer:
             graph = build_graph(checkpointer=checkpointer)
-            result = await invoke_agent(
+            text_response, media_events = await invoke_agent_with_media(
                 graph=graph,
-                tenant_id=tenant_id,
+                owner_type=owner_type,
+                owner_id=owner_id,
                 user_id=user_id,
                 conversation_id=conversation_id,
                 message=message,
+                platform=platform,
+                bot_id=bot_id,
             )
-        return result
+        return {
+            "text": text_response,
+            "media_events": media_events,
+        }
 
     def start_consuming(self):
         """开始消费"""

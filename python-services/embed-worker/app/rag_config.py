@@ -29,24 +29,20 @@ class Settings(BaseSettings):
     # 服务配置
     # ═══════════════════════════════════════════════════════════════════════════════════
     host: str = "0.0.0.0"
-    rag_service_port: int = 8013  # 从 8003 改为 8013，避免与 Java nexus-tenant 冲突
-
-    # Embed Service 配置
-    embed_service_url: str = "http://127.0.0.1:8014"  # 从 8004 改为 8014
-    use_embed_service: bool = True  # 使用独立的 Embed Service，实现解耦
+    rag_service_port: int = 8003
 
     # ═══════════════════════════════════════════════════════════════════════════════════
     # 🆕 向量存储后端选择
     # ═══════════════════════════════════════════════════════════════════════════════════
-    vector_store_backend: VectorStoreBackend = VectorStoreBackend.CHROMA  # 默认使用 ChromaDB（无需外部服务）
+    vector_store_backend: VectorStoreBackend = VectorStoreBackend.CHROMA  # 默认使用 ChromaDB
 
     # ═══════════════════════════════════════════════════════════════════════════════════
     # 🆕 Milvus 配置 (Server 模式)
     # ═══════════════════════════════════════════════════════════════════════════════════
     # Milvus Server 模式：设置为 "http://host:port" 格式
+    milvus_host: str = "localhost"
+    milvus_port: int = 19530
     milvus_uri: str = ""  # 空时使用 host:port 构造
-    milvus_host: str = "localhost"  # Server 模式
-    milvus_port: int = 19530  # Server 模式
     milvus_user: str = ""
     milvus_password: str = ""
     milvus_db: str = "default"

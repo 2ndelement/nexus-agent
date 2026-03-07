@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import socket
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -74,11 +75,6 @@ def health() -> dict:
     return {"status": "ok", "service": "tool-registry"}
 
 
-# ── 启动入口 ───────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    import uvicorn
-
 # ═══════════════════════════════════════════════════════════════════ Nacos 服务注册 ═══════════════════════════════════════════════════════════════════
 
 def get_local_ip():
@@ -92,22 +88,35 @@ def get_local_ip():
     except Exception:
         return "127.0.0.1"
 
+
 def start_nacos_registry():
     """启动 Nacos 服务注册"""
     nacos_enabled = os.getenv("NACOS_ENABLED", "false").lower() == "true"
     if not nacos_enabled:
-        print("[Nacos] 未启用 Nacos 服务注册")
-        return
-    
-    service_name = os.getenv("NACOS_SERVICE_NAME", "nexus-tool-registry")
-    port = int(os.getenv("PORT", "8000"))
-    ip = os.getenv("SERVICE_IP", get_local_ip())
-    
-    registry = create_registry(service_name, ip, port)
-    registry.start()
-    print(f"[Nacos] 服务注册完成: {service_name} -> {ip}:{port}")
+        logger.info("[Nacos] 未启用 Nacos 服务注册")
+        return None
 
-# 启动时注册
-start_nacos_registry()
+    try:
+        from common.nacos import create_registry
+        service_name = os.getenv("NACOS_SERVICE_NAME", "nexus-tool-registry")
+        port = int(os.getenv("PORT", "8011"))
+        ip = os.getenv("SERVICE_IP", get_local_ip())
+
+        registry = create_registry(service_name, ip, port)
+        registry.start()
+        logger.info(f"[Nacos] 服务注册完成: {service_name} -> {ip}:{port}")
+        return registry
+    except Exception as e:
+        logger.warning(f"[Nacos] 服务注册失败: {e}")
+        return None
+
+
+# ── 启动入口 ───────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    import uvicorn
+
+    # 启动时注册
+    _nacos_registry = start_nacos_registry()
 
     uvicorn.run("main:app", host="0.0.0.0", port=8011, reload=False)

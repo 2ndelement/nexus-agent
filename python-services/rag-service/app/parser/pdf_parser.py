@@ -36,8 +36,7 @@ class PDFParser(BaseParser):
                 # 提取文本
                 text = page.get_text("text")
                 if text.strip():
-                    text_parts.append(f"[第{page_num + 1}页]
-{text}")
+                    text_parts.append(f"[第{page_num + 1}页]\n{text}")
                 
                 # 尝试提取表格（简化版）
                 tables = page.find_tables()

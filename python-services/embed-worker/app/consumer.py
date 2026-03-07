@@ -1,7 +1,7 @@
 """
 app/consumer.py — RabbitMQ 消费者
 
-从 nexus.embed.tasks 队列消费消息，调用 embedder 向量化，写入 ChromaDB。
+从 nexus.embed.tasks 队列消费消息，进行 embedding 并写入向量库。
 """
 from __future__ import annotations
 import asyncio
@@ -10,59 +10,61 @@ import logging
 
 import aio_pika
 from aio_pika import IncomingMessage
-from aio_pika.abc import AbstractIncomingChannel
+from aio_pika.abc import AbstractChannel
 
 from app.config import settings
 from app.schemas import EmbedTask, EmbedResult
-from app.embedder import SentenceTransformerEmbedder, get_embedder
-from app.chroma_writer import get_writer
 
 logger = logging.getLogger(__name__)
-
-# Embedder 实例（懒加载）
-_embedder = None
-
-
-def _get_embedder():
-    global _embedder
-    if _embedder is None:
-        _embedder = SentenceTransformerEmbedder(settings.embedding_model)
-    return _embedder
 
 
 async def process_embed_task(task: EmbedTask) -> EmbedResult:
     """
-    处理单个向量化任务。
+    处理向量化任务
+
     流程：
-      1. 提取所有 chunk 文本
-      2. 批量调用 embedder
-      3. 写入 ChromaDB
+      1. 调用 Embed Service 进行 embedding
+      2. 写入 Milvus/ChromaDB
     """
     try:
-        embedder = _get_embedder()
-        writer = get_writer()
+        import httpx
+        import os
 
-        # 提取文本
         texts = [c.content for c in task.chunks]
-        
-        # 批量向量化
-        batch_size = settings.embedding_batch_size
-        all_embeddings = []
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
-            embeddings = embedder.embed_documents(batch)
-            all_embeddings.extend(embeddings)
 
-        # 写入 ChromaDB
-        writer.write_chunks(
+        # 调用 Embed Service 进行 embedding
+        if settings.use_embed_service:
+            logger.info("调用 Embed Service: %s", settings.embed_service_url)
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(
+                    f"{settings.embed_service_url}/api/v1/embed/documents",
+                    json={"texts": texts},
+                )
+                response.raise_for_status()
+                embeddings = response.json()["embeddings"]
+        else:
+            # 本地 embedding（备用）
+            from app.bge_embedder import get_embedder
+            embedder = get_embedder()
+            embeddings = embedder.embed_documents(texts)
+
+        # 写入向量库
+        from app.rag_dependencies import get_milvus_retriever
+        retriever = get_milvus_retriever()
+        retriever.add_chunks(
             tenant_id=task.tenant_id,
             kb_id=task.kb_id,
-            chunks=task.chunks,
-            embeddings=all_embeddings,
+            chunk_ids=[c.chunk_id for c in task.chunks],
+            doc_ids=[task.doc_id] * len(task.chunks),
+            contents=texts,
+            embeddings=embeddings,
+            metadatas=[c.metadata for c in task.chunks],
         )
 
-        logger.info("向量化完成: task_id=%s, doc_id=%s, chunks=%d", 
-                    task.task_id, task.doc_id, len(task.chunks))
+        logger.info(
+            "向量化完成: task_id=%s, doc_id=%s, chunks=%d",
+            task.task_id, task.doc_id, len(task.chunks)
+        )
 
         return EmbedResult(
             task_id=task.task_id,
@@ -91,44 +93,71 @@ async def on_message(message: IncomingMessage):
         try:
             body = json.loads(message.body.decode())
             task = EmbedTask(**body)
-            logger.debug("收到任务: task_id=%s, doc_id=%s", task.task_id, task.doc_id)
+            logger.info("收到任务: task_id=%s, doc_id=%s, chunks=%d",
+                       task.task_id, task.doc_id, len(task.chunks))
 
             result = await process_embed_task(task)
 
-            # 可选：发布结果到 result exchange（供其他服务监听）
-            # 这里简单打印，实际生产可发布到 nexus.embed.results
             if result.status == "success":
-                logger.info("任务成功: task_id=%s", result.task_id)
+                logger.info("任务成功: task_id=%s, embedded=%d",
+                           result.task_id, result.embedded_count)
             else:
-                logger.error("任务失败: task_id=%s, error=%s", result.task_id, result.error)
+                logger.error("任务失败: task_id=%s, error=%s",
+                            result.task_id, result.error)
 
         except Exception as e:
             logger.exception("消息处理异常: %s", str(e))
 
 
+async def warmup_models():
+    """预热：检查 Embed Service 连接"""
+    import httpx
+    if settings.use_embed_service:
+        logger.info("[Warmup] 检查 Embed Service 连接...")
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(f"{settings.embed_service_url}/health")
+                response.raise_for_status()
+                logger.info("[Warmup] Embed Service 连接正常")
+        except Exception as e:
+            logger.warning(f"[Warmup] Embed Service 连接失败: {e}")
+    else:
+        logger.info("[Warmup] 预热本地 Embedding 模型...")
+        try:
+            from app.bge_embedder import get_embedder
+            embedder = get_embedder()
+            embedder.embed_query("warmup")
+            logger.info("[Warmup] Embedding 模型预热完成")
+        except Exception as e:
+            logger.warning(f"[Warmup] Embedding 模型预热失败: {e}")
+
+
 async def start_consumer():
     """启动消费者"""
-    logger.info("连接 RabbitMQ: %s", settings.rabbitmq_url.replace("@", "@***"))
-    
+    # 先预热模型
+    await warmup_models()
+
+    logger.info("连接 RabbitMQ: %s", settings.rabbitmq_url.replace("guest:guest", "***:***"))
+
     connection = await aio_pika.connect_robust(settings.rabbitmq_url)
-    channel: AbstractIncomingChannel = await connection.channel()
-    
+    channel: AbstractChannel = await connection.channel()
+
     # 声明队列
     queue = await channel.declare_queue(
         settings.embed_queue,
-        durable=True,  # 持久化，重启不丢
+        durable=True,
     )
 
-    # 设置预取数（并发控制）
+    # 设置预取数
     await channel.set_qos(prefetch_count=settings.worker_concurrency)
 
-    logger.info("开始消费队列: %s, 并发: %d", 
+    logger.info("开始消费队列: %s, 并发: %d",
                 settings.embed_queue, settings.worker_concurrency)
 
     await queue.consume(on_message)
 
     # 保持运行
-    await asyncio.Future()  # 永远等待
+    await asyncio.Future()
 
 
 async def main():
@@ -136,5 +165,9 @@ async def main():
         level=getattr(logging, settings.log_level.upper()),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    logger.info("启动 embed-worker...")
+    logger.info("启动 embed-worker (使用 RAG service 模块)...")
     await start_consumer()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

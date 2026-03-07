@@ -1,0 +1,25 @@
+FROM python:3.11
+
+# 数据分析工具
+RUN pip install --no-cache-dir \
+    numpy \
+    pandas \
+    matplotlib \
+    scipy \
+    scikit-learn
+
+# 常用工具库
+RUN pip install --no-cache-dir \
+    requests \
+    beautifulsoup4 \
+    pillow \
+    pyyaml \
+    python-dateutil \
+    tabulate \
+    openpyxl \
+    xlrd
+
+# 清理
+RUN apt-get clean && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace

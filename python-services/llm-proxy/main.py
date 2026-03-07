@@ -6,12 +6,10 @@ main.py — LLM Proxy FastAPI 应用入口
 from __future__ import annotations
 
 import logging
-
-import uvicorn
-
 import os
 import socket
-from common.nacos import create_registry
+
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -78,11 +76,6 @@ async def list_models() -> dict:
     }
 
 
-# ─────────────────────────── 启动 ───────────────────────────
-if __name__ == "__main__":
-    from app.config import settings
-
-
 # ═══════════════════════════════════════════════════════════════════ Nacos 服务注册 ═══════════════════════════════════════════════════════════════════
 
 def get_local_ip():
@@ -96,23 +89,35 @@ def get_local_ip():
     except Exception:
         return "127.0.0.1"
 
+
 def start_nacos_registry():
     """启动 Nacos 服务注册"""
     nacos_enabled = os.getenv("NACOS_ENABLED", "false").lower() == "true"
     if not nacos_enabled:
-        print("[Nacos] 未启用 Nacos 服务注册")
-        return
-    
-    service_name = os.getenv("NACOS_SERVICE_NAME", "nexus-llm-proxy")
-    port = int(os.getenv("PORT", "8000"))
-    ip = os.getenv("SERVICE_IP", get_local_ip())
-    
-    registry = create_registry(service_name, ip, port)
-    registry.start()
-    print(f"[Nacos] 服务注册完成: {service_name} -> {ip}:{port}")
+        logger.info("[Nacos] 未启用 Nacos 服务注册")
+        return None
 
-# 启动时注册
-start_nacos_registry()
+    try:
+        from common.nacos import create_registry
+        service_name = os.getenv("NACOS_SERVICE_NAME", "nexus-llm-proxy")
+        port = int(os.getenv("PORT", "8010"))
+        ip = os.getenv("SERVICE_IP", get_local_ip())
+
+        registry = create_registry(service_name, ip, port)
+        registry.start()
+        logger.info(f"[Nacos] 服务注册完成: {service_name} -> {ip}:{port}")
+        return registry
+    except Exception as e:
+        logger.warning(f"[Nacos] 服务注册失败: {e}")
+        return None
+
+
+# ─────────────────────────── 启动 ───────────────────────────
+if __name__ == "__main__":
+    from app.config import settings
+
+    # 启动时注册
+    _nacos_registry = start_nacos_registry()
 
     uvicorn.run(
         "main:app",

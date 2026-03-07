@@ -14,8 +14,8 @@ import threading
 
 from pymilvus import DataType
 
-from app.config import Settings, VectorStoreBackend, settings
-from app.embedder import (
+from app.rag_config import Settings, VectorStoreBackend, settings
+from app.bge_embedder import (
     BaseEmbedder,
     BGEEmbedder,
     MockEmbedder,
@@ -61,6 +61,7 @@ class MilvusRetrieverWrapper:
             return
 
         from pymilvus import MilvusClient
+        import os
 
         # 支持 Milvus Server 模式
         uri = self.config.milvus_uri

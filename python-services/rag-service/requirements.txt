@@ -3,14 +3,17 @@ uvicorn[standard]>=0.30.0
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
 
-# ChromaDB
+# Milvus (必须 >= 2.5.0 支持 SPARSE_FLOAT_VECTOR)
+pymilvus>=2.5.0
+
+# ChromaDB (保留用于测试/对比)
 chromadb>=0.4.0
 
 # Embedding
 sentence-transformers>=2.2.0
 numpy>=1.24.0
 
-# Reranker (可选)
+# Reranker
 FlagEmbedding>=1.2.0
 
 # 文档解析 (可选)

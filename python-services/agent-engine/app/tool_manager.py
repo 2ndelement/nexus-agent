@@ -126,6 +126,60 @@ class ToolManager:
                 "required": ["code"],
             },
         },
+        {
+            "name": "knowledge_search",
+            "description": "知识库检索 - 从绑定的知识库中检索相关信息。当用户询问需要查阅知识库的问题时使用此工具。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "检索查询文本，描述要搜索的内容",
+                    },
+                    "knowledge_base_id": {
+                        "type": "string",
+                        "description": "知识库ID",
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "返回结果数量，默认5条",
+                        "default": 5,
+                    },
+                },
+                "required": ["query", "knowledge_base_id"],
+            },
+        },
+        {
+            "name": "media_send",
+            "description": "发送图片、视频、音频等多媒体内容到聊天界面。当需要向用户展示图像、音频、视频或文件时使用此工具。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "媒体文件URL（优先使用）。支持 HTTP URL 或 data URI（data:image/png;base64,xxx）",
+                    },
+                    "base64": {
+                        "type": "string",
+                        "description": "Base64编码数据（可选，与 url 二选一）",
+                    },
+                    "media_type": {
+                        "type": "string",
+                        "enum": ["image", "video", "audio", "file"],
+                        "description": "媒体类型",
+                    },
+                    "mime_type": {
+                        "type": "string",
+                        "description": "MIME类型，如 image/png, video/mp4",
+                    },
+                    "filename": {
+                        "type": "string",
+                        "description": "文件名（可选）",
+                    },
+                },
+                "required": ["media_type"],
+            },
+        },
     ]
 
     def __init__(self):
@@ -270,6 +324,10 @@ class ToolExecutor:
             return await self._execute_search(arguments)
         elif tool_name == "sandbox_execute":
             return await self._execute_sandbox(arguments)
+        elif tool_name == "knowledge_search":
+            return await self._execute_knowledge_search(arguments, tenant_id)
+        elif tool_name == "media_send":
+            return await self._execute_media_send(arguments)
         else:
             return {"success": False, "error": f"未知工具: {tool_name}"}
 
@@ -312,6 +370,109 @@ class ToolExecutor:
         """网络搜索"""
         # TODO: 实现搜索
         return {"success": True, "result": "搜索功能开发中"}
+
+    async def _execute_knowledge_search(self, arguments: dict, tenant_id: str) -> dict:
+        """知识库检索"""
+        import httpx
+
+        rag_url = os.getenv("RAG_SERVICE_URL", "http://127.0.0.1:8013")
+
+        query = arguments.get("query", "")
+        kb_id = arguments.get("knowledge_base_id", "")
+        top_k = arguments.get("top_k", 5)
+
+        if not query:
+            return {"success": False, "error": "query 参数不能为空"}
+        if not kb_id:
+            return {"success": False, "error": "knowledge_base_id 参数不能为空"}
+
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    f"{rag_url}/api/v1/knowledge/retrieve",
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Tenant-Id": tenant_id,
+                    },
+                    json={
+                        "query": query,
+                        "knowledge_base_id": kb_id,
+                        "top_k": top_k,
+                    },
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    results = data.get("results", [])
+
+                    if not results:
+                        return {
+                            "success": True,
+                            "message": "未找到相关信息",
+                            "results": [],
+                        }
+
+                    # 格式化结果供 LLM 使用
+                    formatted_results = []
+                    for r in results:
+                        formatted_results.append({
+                            "content": r.get("content", ""),
+                            "score": round(r.get("score", 0), 4),
+                            "doc_id": r.get("doc_id", ""),
+                        })
+
+                    return {
+                        "success": True,
+                        "message": f"找到 {len(results)} 条相关信息",
+                        "results": formatted_results,
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": f"检索失败: HTTP {response.status_code}",
+                    }
+        except Exception as e:
+            logger.error(f"Knowledge search error: {e}")
+            return {"success": False, "error": f"检索异常: {str(e)}"}
+
+    async def _execute_media_send(self, arguments: dict) -> dict:
+        """发送多媒体内容"""
+        import json
+
+        url = arguments.get("url")
+        base64_data = arguments.get("base64")
+        media_type = arguments.get("media_type", "image")
+        mime_type = arguments.get("mime_type")
+        filename = arguments.get("filename")
+
+        # 如果提供的是 base64 而非 URL，转换为 data URI
+        if base64_data and not url:
+            if not mime_type:
+                # 根据 base64 特征推断 MIME 类型
+                if base64_data.startswith("/9j"):
+                    mime_type = "image/png"
+                elif base64_data.startswith("iVBOR"):
+                    mime_type = "image/png"
+                elif base64_data.startswith("R0lGO"):
+                    mime_type = "image/gif"
+                elif base64_data.startswith("JVBER"):
+                    mime_type = "application/pdf"
+                else:
+                    mime_type = f"{media_type}/generic"
+            url = f"data:{mime_type};base64,{base64_data}"
+
+        if not url:
+            return {"success": False, "error": "必须提供 url 或 base64 参数"}
+
+        # 返回特殊的 media 类型结果，graph.py 会检测并发送 SSE media 事件
+        return {
+            "success": True,
+            "type": "media",
+            "media_type": media_type,
+            "url": url,
+            "mime_type": mime_type or f"{media_type}/generic",
+            "filename": filename,
+        }
 
 
 # 全局单例

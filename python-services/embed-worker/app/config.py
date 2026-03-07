@@ -11,18 +11,21 @@ class Settings(BaseSettings):
     embed_queue: str = "nexus.embed.tasks"
     embed_result_exchange: str = "nexus.embed.results"
 
-    # ChromaDB
-    chroma_host: str = "localhost"
-    chroma_port: int = 8100
-    chroma_persist_path: str = "/data/chroma"
-    chroma_mode: str = "http"          # "http" | "persistent" | "memory"
+    # Embed Service（推荐：使用独立的 Embed Service）
+    embed_service_url: str = "http://127.0.0.1:8004"
+    use_embed_service: bool = True  # 是否使用独立的 Embed Service
 
-    # Embedding 模型
-    embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
-    embedding_batch_size: int = 32     # 每批 embed 的 chunk 数
+    # Milvus（向量库）
+    milvus_host: str = "localhost"
+    milvus_port: int = 19530
+    milvus_uri: str = ""  # 空时使用 host:port 构造
+
+    # ChromaDB（备用）
+    chroma_persist_directory: str = "./data/chroma"
+    vector_store_backend: str = "chroma"  # "milvus" | "chroma"
 
     # 运行配置
-    worker_concurrency: int = 2        # 同时处理的消息数
+    worker_concurrency: int = 2
     log_level: str = "INFO"
 
     class Config:
